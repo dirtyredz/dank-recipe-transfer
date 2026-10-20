@@ -8,7 +8,10 @@ import io.github.dirtyredz.danktransfer.network.TransferMessages.Entry;
 import io.github.dirtyredz.danktransfer.network.TransferMessages.Snapshot;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.inventory.AbstractContainerMenu;
 import net.minecraft.world.item.ItemStack;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
 import java.util.Collection;
@@ -32,6 +35,7 @@ import java.util.function.BiConsumer;
  */
 public final class DankSnapshotService {
     public static final int CHECK_INTERVAL = 5;
+    private static final Logger LOGGER = LoggerFactory.getLogger(DankSnapshotService.class);
     private static final int REMEMBERED_REQUESTS = 64;
 
     /** Live subscription state for one player. */
@@ -69,14 +73,24 @@ public final class DankSnapshotService {
         this.sender = sender;
     }
 
-    /** Starts (or restarts) a subscription and sends the first snapshot immediately. */
+    /**
+     * Starts (or restarts) a subscription and sends the first snapshot immediately. A menu the
+     * server cannot serve gets an explicit "unsupported" reply, so the client falls back to native
+     * behaviour instead of waiting for a snapshot that will never come.
+     */
     public void subscribe(ServerPlayer player, int menuId) {
-        if (player.containerMenu.containerId != menuId || !CraftingMenuAccess.isSupported(player.containerMenu)) {
+        AbstractContainerMenu open = player.containerMenu;
+        if (open.containerId != menuId || !CraftingMenuAccess.isSupported(open)) {
             subscriptions.remove(player.getUUID());
+            LOGGER.debug("Refused Dank snapshot subscription from {} for menu {} (open: {} #{})",
+                    player.getGameProfile().getName(), menuId, open.getClass().getName(), open.containerId);
+            sender.accept(player, Snapshot.unsupported(menuId));
             return;
         }
         Subscription subscription = new Subscription(menuId, ThreadLocalRandom.current().nextInt());
         subscriptions.put(player.getUUID(), subscription);
+        LOGGER.debug("Dank snapshot subscription from {} for menu {} ({})",
+                player.getGameProfile().getName(), menuId, open.getClass().getName());
         refresh(player, subscription);
     }
 
@@ -180,6 +194,6 @@ public final class DankSnapshotService {
         for (Map.Entry<ItemKey, Long> e : contents.entrySet()) {
             entries.add(new Entry<>(e.getKey().toStack(1), e.getValue()));
         }
-        return new Snapshot<>(subscription.menuId, subscription.session, subscription.revision, false, entries);
+        return new Snapshot<>(subscription.menuId, subscription.session, subscription.revision, true, false, entries);
     }
 }

@@ -20,9 +20,9 @@ import java.util.Optional;
 import java.util.function.Predicate;
 
 /**
- * Exact vanilla crafting menu layouts: the crafting table ({@link CraftingMenu}) and the player
- * inventory grid ({@link InventoryMenu}). Subclasses are deliberately unsupported because their
- * slot layout is not known.
+ * Vanilla crafting menu layouts: the crafting table ({@link CraftingMenu}) and the player
+ * inventory grid ({@link InventoryMenu}). A subclass is accepted only if it keeps the vanilla
+ * slot layout (46 slots, crafting container behind the grid).
  *
  * <p>Menu slot layouts (vanilla 1.20.1):
  * <ul>
@@ -46,14 +46,21 @@ public final class CraftingMenuAccess {
         this.firstInventorySlot = firstInventorySlot;
     }
 
+    /** Slot count of both vanilla menus: CraftingMenu 1+9+36, InventoryMenu 1+4+4+36+1. */
+    private static final int VANILLA_SLOT_COUNT = 46;
+
     public static Optional<CraftingMenuAccess> of(AbstractContainerMenu menu) {
-        if (menu == null) {
+        if (menu == null || menu.slots.size() != VANILLA_SLOT_COUNT) {
             return Optional.empty();
         }
-        if (menu.getClass() == CraftingMenu.class) {
+        // Subclasses are accepted when they keep the vanilla layout. EnderIO's painted crafting
+        // table, FTB Essentials' /craft and Ars Nouveau's craft effect all open the crafting table
+        // screen (MenuType.CRAFTING) with a server-side CraftingMenu subclass that only overrides
+        // stillValid; the client builds a plain CraftingMenu for the same screen.
+        if (menu instanceof CraftingMenu && menu.getSlot(1).container instanceof CraftingContainer) {
             return Optional.of(new CraftingMenuAccess(menu, 3, 3, 10));
         }
-        if (menu.getClass() == InventoryMenu.class) {
+        if (menu instanceof InventoryMenu && menu.getSlot(1).container instanceof CraftingContainer) {
             return Optional.of(new CraftingMenuAccess(menu, 2, 2, 9));
         }
         return Optional.empty();

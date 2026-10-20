@@ -23,6 +23,8 @@ import net.minecraft.world.inventory.AbstractContainerMenu;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.CraftingRecipe;
 import org.jetbrains.annotations.Nullable;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -38,6 +40,7 @@ import java.util.function.Consumer;
 public final class ClientTransfer {
     /** Ticks to wait for an acknowledgement before failing the pending transfer. */
     private static final int TIMEOUT_TICKS = 100;
+    private static final Logger LOGGER = LoggerFactory.getLogger(ClientTransfer.class);
 
     private static final DankSnapshotCache<ItemStack> CACHE = new DankSnapshotCache<>();
     private static final PendingTransfer PENDING = new PendingTransfer();
@@ -104,6 +107,9 @@ public final class ClientTransfer {
         if (snapshot == null) {
             return Preflight.NOT_SYNCED;
         }
+        if (!snapshot.supported()) {
+            return Preflight.UNSUPPORTED;
+        }
         List<List<Stack<ItemKey>>> danks = List.of(snapshotStacks(snapshot));
         TransferPlan<ItemKey> plan = TransferPlanner.plan(
                 access.get().planInput(pattern.get(), danks, DankSource::isCarrier, player), batches);
@@ -140,7 +146,7 @@ public final class ClientTransfer {
      */
     public static boolean send(AbstractContainerMenu menu, CraftingRecipe recipe, int batches, Consumer<TransferOutcome> onDone) {
         Snapshot<ItemStack> snapshot = CACHE.current(menu.containerId);
-        if (snapshot == null || !serverSupports()) {
+        if (snapshot == null || !snapshot.supported() || !serverSupports()) {
             return false;
         }
         OptionalInt id = PENDING.begin(ticks, outcome -> {
@@ -179,7 +185,10 @@ public final class ClientTransfer {
     // ---- network entry points (main thread) ----
 
     public static void onSnapshot(Snapshot<ItemStack> snapshot) {
-        CACHE.accept(snapshot);
+        boolean accepted = CACHE.accept(snapshot);
+        LOGGER.debug("Dank snapshot for menu {} (session {}, revision {}, supported {}, {} entries): {}",
+                snapshot.menuId(), snapshot.session(), snapshot.revision(), snapshot.supported(),
+                snapshot.entries().size(), accepted ? "accepted" : "ignored");
     }
 
     public static void onResult(TransferResult result) {
@@ -208,6 +217,8 @@ public final class ClientTransfer {
         subscribedMenu = desired;
         CACHE.watch(desired);
         if (desired != DankSnapshotCache.NONE) {
+            LOGGER.debug("Subscribing to Dank snapshots for menu {} ({})", desired,
+                    mc.player.containerMenu.getClass().getName());
             TransferChannel.sendToServer(new Subscribe(desired, true));
         }
     }

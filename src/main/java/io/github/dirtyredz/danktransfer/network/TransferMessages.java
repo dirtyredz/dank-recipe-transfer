@@ -80,17 +80,29 @@ public final class TransferMessages {
      * @param menuId    the menu this snapshot belongs to
      * @param session   server-chosen token for this subscription (menu ids are reused)
      * @param revision  increases on every content change within a session
+     * @param supported false when the server cannot serve this menu; the client then keeps native
+     *                  behaviour instead of waiting for contents that will never come
      * @param truncated true when entries were dropped to respect the size bounds
      */
-    public record Snapshot<T>(int menuId, int session, int revision, boolean truncated, List<Entry<T>> entries) {
+    public record Snapshot<T>(int menuId, int session, int revision, boolean supported, boolean truncated,
+                              List<Entry<T>> entries) {
         public Snapshot {
             entries = List.copyOf(entries);
+            if (!supported && !entries.isEmpty()) {
+                throw new IllegalArgumentException("an unsupported-menu reply carries no entries");
+            }
+        }
+
+        /** The server's answer to a subscription it cannot serve. */
+        public static <T> Snapshot<T> unsupported(int menuId) {
+            return new Snapshot<>(menuId, 0, 0, false, false, List.of());
         }
 
         public void encode(FriendlyByteBuf buf, PrototypeCodec<T> codec) {
             buf.writeVarInt(menuId);
             buf.writeInt(session);
             buf.writeVarInt(revision);
+            buf.writeBoolean(supported);
             boolean cut = truncated;
             int written = 0;
             for (Entry<T> entry : entries) {
@@ -120,6 +132,7 @@ public final class TransferMessages {
             int menuId = buf.readVarInt();
             int session = buf.readInt();
             int revision = buf.readVarInt();
+            boolean supported = buf.readBoolean();
             List<Entry<T>> entries = new ArrayList<>();
             while (buf.readBoolean()) {
                 if (entries.size() >= MAX_SNAPSHOT_ENTRIES) {
@@ -136,7 +149,10 @@ public final class TransferMessages {
             if (buf.isReadable()) {
                 throw new DecoderException("trailing snapshot bytes: " + buf.readableBytes());
             }
-            return new Snapshot<>(menuId, session, revision, truncated, entries);
+            if (!supported && !entries.isEmpty()) {
+                throw new DecoderException("unsupported-menu reply with entries");
+            }
+            return new Snapshot<>(menuId, session, revision, supported, truncated, entries);
         }
     }
 

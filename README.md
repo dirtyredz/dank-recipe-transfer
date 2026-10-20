@@ -24,7 +24,8 @@ needed and not used.
 
 ## Behaviour
 
-- Works only on the exact vanilla `CraftingMenu` (crafting table) and `InventoryMenu` (2x2 grid),
+- Works on the vanilla `CraftingMenu` (crafting table) and `InventoryMenu` (2x2 grid), including
+  subclasses that keep the vanilla layout (EnderIO painted crafting table, FTB Essentials `/craft`),
   with registered shaped and shapeless crafting recipes. Special recipes (dyeing, map cloning...),
   modded crafting stations, AE2 terminals, Curios and nested containers keep native behaviour.
 - **Sources, in order:** items already in the grid, then the 36 loose inventory slots (main
@@ -43,7 +44,10 @@ needed and not used.
   ignored, like Dank refuses to open it. Discovery never creates, upgrades or relinks storage.
 - The button reflects Dank contents only after the server sends the first snapshot (a few ticks
   after the grid opens). Until then the viewer behaves natively and Dank-only recipes show as
-  missing. EMI's button refreshes on its own when the snapshot arrives.
+  missing. EMI's button refreshes on its own when the snapshot arrives. A menu the server cannot
+  serve gets an explicit "unsupported" reply, and the viewer stays native.
+- Diagnostics: subscription accept/refuse (server) and snapshot receipt (client) are logged at
+  DEBUG, so they appear in `logs/debug.log`.
 
 ## How it works
 

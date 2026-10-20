@@ -14,6 +14,7 @@ import dev.emi.emi.registry.EmiRecipeFiller;
 import io.github.dirtyredz.danktransfer.DankRecipeTransfer;
 import io.github.dirtyredz.danktransfer.client.ClientTransfer;
 import io.github.dirtyredz.danktransfer.client.ClientTransfer.Preflight;
+import io.github.dirtyredz.danktransfer.crafting.CraftingMenuAccess;
 import io.github.dirtyredz.danktransfer.crafting.TransferPlan;
 import io.github.dirtyredz.danktransfer.crafting.TransferPlanner;
 import io.github.dirtyredz.danktransfer.network.TransferMessages.Entry;
@@ -58,12 +59,15 @@ public final class DankEmiTransferHandler<T extends AbstractContainerMenu> imple
         if (screen == null || handlers.isEmpty()) {
             return handlers;
         }
-        Class<?> menuClass = screen.getMenu().getClass();
+        AbstractContainerMenu menu = screen.getMenu();
+        if (!CraftingMenuAccess.isSupported(menu)) {
+            return handlers;
+        }
         List<EmiRecipeHandler<T>> result = null;
         for (int i = 0; i < handlers.size(); i++) {
             EmiRecipeHandler<T> handler = handlers.get(i);
-            boolean table = handler.getClass() == CraftingRecipeHandler.class && menuClass == CraftingMenu.class;
-            boolean inventory = handler.getClass() == InventoryRecipeHandler.class && menuClass == InventoryMenu.class;
+            boolean table = handler.getClass() == CraftingRecipeHandler.class && menu instanceof CraftingMenu;
+            boolean inventory = handler.getClass() == InventoryRecipeHandler.class && menu instanceof InventoryMenu;
             if (table || inventory) {
                 if (result == null) {
                     result = new ArrayList<>(handlers);

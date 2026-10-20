@@ -3,6 +3,7 @@ package io.github.dirtyredz.danktransfer.compat.jei;
 import io.github.dirtyredz.danktransfer.DankRecipeTransfer;
 import io.github.dirtyredz.danktransfer.client.ClientTransfer;
 import io.github.dirtyredz.danktransfer.client.ClientTransfer.Preflight;
+import io.github.dirtyredz.danktransfer.crafting.CraftingMenuAccess;
 import io.github.dirtyredz.danktransfer.crafting.TransferPlan;
 import io.github.dirtyredz.danktransfer.crafting.TransferPlanner;
 import mezz.jei.api.constants.RecipeTypes;
@@ -72,8 +73,9 @@ public final class DankJeiTransferHandler<C extends AbstractContainerMenu, R> im
             return found;
         }
         IRecipeTransferHandler<C, R> handler = found.get();
-        boolean table = handler instanceof BasicRecipeTransferHandler<?, ?> && container.getClass() == CraftingMenu.class;
-        boolean inventory = handler instanceof PlayerRecipeTransferHandler && container.getClass() == InventoryMenu.class;
+        boolean supported = CraftingMenuAccess.isSupported(container);
+        boolean table = supported && handler instanceof BasicRecipeTransferHandler<?, ?> && container instanceof CraftingMenu;
+        boolean inventory = supported && handler instanceof PlayerRecipeTransferHandler && container instanceof InventoryMenu;
         if (!table && !inventory) {
             return found;
         }

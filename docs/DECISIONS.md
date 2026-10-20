@@ -2,6 +2,16 @@
 
 Newest first.
 
+## 2026-10-20 — Accept CraftingMenu subclasses with the vanilla layout; answer every subscription
+
+Found in owner testing (0.1.0): EMI's fill button stayed on "Syncing Dank contents..." forever.
+Mods such as EnderIO (painted crafting table), FTB Essentials (`/craft`) and Ars Nouveau open the
+crafting-table screen with a server-side `CraftingMenu` subclass that only overrides `stillValid`.
+The client builds a plain `CraftingMenu` for that screen, so it subscribed; the server required the
+exact class and silently dropped the subscription, so no snapshot ever came. Now the server accepts
+any `CraftingMenu`/`InventoryMenu` with the vanilla 46-slot layout, and refuses any other menu with
+an explicit "unsupported" reply so the client falls back to native behaviour.
+
 ## 2026-10-20 — Mixins live in `compat/mixin/`, not beside their handlers
 
 Mixin refuses to let normal code load any class inside the configured mixin package, so the

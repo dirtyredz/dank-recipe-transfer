@@ -51,7 +51,7 @@ class SnapshotProtocolTest {
 
     @SafeVarargs
     private static Snapshot<String> snapshot(int menu, int session, int revision, Entry<String>... entries) {
-        return new Snapshot<>(menu, session, revision, false, List.of(entries));
+        return new Snapshot<>(menu, session, revision, true, false, List.of(entries));
     }
 
     @Test
@@ -68,7 +68,7 @@ class SnapshotProtocolTest {
         for (int i = 0; i < TransferMessages.MAX_SNAPSHOT_ENTRIES + 10; i++) {
             entries.add(new Entry<>("item_" + i, i + 1));
         }
-        Snapshot<String> out = roundTrip(new Snapshot<>(1, 1, 1, false, entries));
+        Snapshot<String> out = roundTrip(new Snapshot<>(1, 1, 1, true, false, entries));
         assertTrue(out.truncated());
         assertEquals(TransferMessages.MAX_SNAPSHOT_ENTRIES, out.entries().size());
     }
@@ -81,7 +81,7 @@ class SnapshotProtocolTest {
             entries.add(new Entry<>(big, 1));
         }
         FriendlyByteBuf buf = buf();
-        new Snapshot<>(1, 1, 1, false, entries).encode(buf, STRINGS);
+        new Snapshot<>(1, 1, 1, true, false, entries).encode(buf, STRINGS);
         assertTrue(buf.writerIndex() <= TransferMessages.MAX_SNAPSHOT_BYTES + 2);
         Snapshot<String> out = Snapshot.decode(buf, STRINGS);
         assertTrue(out.truncated());
@@ -95,6 +95,7 @@ class SnapshotProtocolTest {
         negative.writeVarInt(1);
         negative.writeInt(1);
         negative.writeVarInt(1);
+        negative.writeBoolean(true); // supported
         negative.writeBoolean(true);
         negative.writeUtf("a");
         negative.writeVarLong(0);
@@ -105,6 +106,7 @@ class SnapshotProtocolTest {
         flood.writeVarInt(1);
         flood.writeInt(1);
         flood.writeVarInt(1);
+        flood.writeBoolean(true); // supported
         for (int i = 0; i <= TransferMessages.MAX_SNAPSHOT_ENTRIES; i++) {
             flood.writeBoolean(true);
             flood.writeUtf("a");
@@ -218,9 +220,37 @@ class SnapshotProtocolTest {
     @Test
     void snapshotsAreImmutable() {
         List<Entry<String>> entries = new ArrayList<>(List.of(new Entry<>("a", 1)));
-        Snapshot<String> snapshot = new Snapshot<>(1, 1, 1, false, entries);
+        Snapshot<String> snapshot = new Snapshot<>(1, 1, 1, true, false, entries);
         entries.add(new Entry<>("b", 1));
         assertEquals(1, snapshot.entries().size());
         assertThrows(UnsupportedOperationException.class, () -> snapshot.entries().add(new Entry<>("c", 1)));
+    }
+
+    @Test
+    void unsupportedReplyRoundTripsAndIsCached() {
+        Snapshot<String> reply = Snapshot.unsupported(9);
+        Snapshot<String> out = roundTrip(reply);
+        assertEquals(reply, out);
+        assertFalse(out.supported());
+        DankSnapshotCache<String> cache = new DankSnapshotCache<>();
+        cache.watch(9);
+        assertTrue(cache.accept(out), "the client records the refusal instead of waiting forever");
+        assertSame(out, cache.current(9));
+        assertTrue(cache.accept(snapshot(9, 77, 0)), "a later real snapshot replaces it");
+    }
+
+    @Test
+    void unsupportedReplyWithEntriesIsMalformed() {
+        FriendlyByteBuf buf = buf();
+        buf.writeVarInt(1);
+        buf.writeInt(0);
+        buf.writeVarInt(0);
+        buf.writeBoolean(false);
+        buf.writeBoolean(true);
+        buf.writeUtf("a");
+        buf.writeVarLong(1);
+        buf.writeBoolean(false);
+        buf.writeBoolean(false);
+        assertThrows(DecoderException.class, () -> Snapshot.decode(buf, STRINGS));
     }
 }
