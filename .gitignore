@@ -3,6 +3,8 @@
 build/
 out/
 bin/
+# Datagen cache (generated resources themselves are tracked)
+src/generated/resources/.cache/
 # ForgeGradle run directories
 run/
 runs/
