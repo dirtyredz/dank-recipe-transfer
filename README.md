@@ -64,7 +64,7 @@ client (JEI / EMI adapter)            server
   an old snapshot revision is rejected as stale (no automatic retry).
 - Polymorph, when present, is told which recipe was requested before the result is recomputed.
 
-See [STRUCTURE.md](STRUCTURE.md) for the code map.
+See [STRUCTURE.md](STRUCTURE.md) for the code map and [docs/DECISIONS.md](docs/DECISIONS.md) for why.
 
 ## Build and test
 

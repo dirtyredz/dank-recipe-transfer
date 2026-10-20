@@ -18,6 +18,7 @@ Code map. Behaviour and protocol: [README.md](README.md).
 - `src/test/java/io/github/dirtyredz/danktransfer/` — pure JUnit tests (no Minecraft bootstrap)
 - `src/gameTest/java/io/github/dirtyredz/danktransfer/` — Forge GameTests; never in the release jar
 - `src/gameTest/resources/` — GameTest structure and a test-only Dank blacklist tag
+- `docs/` — design decisions
 
 ## Components
 
