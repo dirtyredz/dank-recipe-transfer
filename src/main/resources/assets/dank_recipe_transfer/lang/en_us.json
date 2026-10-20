@@ -1,0 +1,18 @@
+{
+  "dank_recipe_transfer.outcome.success": "Recipe filled",
+  "dank_recipe_transfer.outcome.missing": "Missing ingredients (inventory and Danks)",
+  "dank_recipe_transfer.outcome.no_return_space": "Not enough inventory space for the items already in the grid",
+  "dank_recipe_transfer.outcome.grid_full": "The crafting grid is already full for this recipe",
+  "dank_recipe_transfer.outcome.invalid_recipe": "This recipe cannot be filled from Danks",
+  "dank_recipe_transfer.outcome.wrong_menu": "The crafting grid was closed or changed",
+  "dank_recipe_transfer.outcome.stale": "Dank contents changed; try again",
+  "dank_recipe_transfer.outcome.cursor_occupied": "Put down the item on your cursor first",
+  "dank_recipe_transfer.outcome.illegal_quantity": "Invalid recipe quantity",
+  "dank_recipe_transfer.outcome.duplicate": "Duplicate transfer request ignored",
+  "dank_recipe_transfer.outcome.extraction_failed": "A Dank refused to give up an item; nothing was moved",
+  "dank_recipe_transfer.outcome.recipe_mismatch": "The filled grid did not match the recipe; nothing was moved",
+  "dank_recipe_transfer.outcome.timeout": "No answer from the server; try again",
+  "dank_recipe_transfer.jei.busy": "A Dank transfer is still in progress",
+  "dank_recipe_transfer.emi.no_return_space": "Not enough inventory space for the items already in the grid",
+  "dank_recipe_transfer.syncing": "Syncing Dank contents..."
+}

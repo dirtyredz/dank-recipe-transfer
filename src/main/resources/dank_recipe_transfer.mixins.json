@@ -1,0 +1,16 @@
+{
+  "required": true,
+  "minVersion": "0.8",
+  "package": "io.github.dirtyredz.danktransfer.compat.mixin",
+  "plugin": "io.github.dirtyredz.danktransfer.compat.MixinGate",
+  "compatibilityLevel": "JAVA_17",
+  "client": [
+    "jei.JeiTransferLookupMixin",
+    "emi.EmiHandlerLookupMixin",
+    "emi.EmiFillButtonMixin",
+    "emi.RecipeButtonWidgetAccessor"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}
