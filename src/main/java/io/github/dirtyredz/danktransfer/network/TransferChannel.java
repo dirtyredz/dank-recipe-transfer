@@ -33,6 +33,7 @@ public final class TransferChannel {
     private TransferChannel() {
     }
 
+    @SuppressWarnings("removal") // the (namespace, path) constructor keeps Forge 47.0-47.2 support
     public static void register(ServerRequestHandler handler) {
         server = handler;
         channel = NetworkRegistry.ChannelBuilder

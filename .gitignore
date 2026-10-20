@@ -6,6 +6,7 @@ bin/
 # ForgeGradle run directories
 run/
 runs/
+logs/
 # IDE
 .idea/
 *.iml
