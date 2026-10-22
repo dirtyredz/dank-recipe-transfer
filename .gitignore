@@ -25,3 +25,4 @@ Desktop.ini
 # Structure-review gate markers (local only)
 .structure-review-pending*
 .structure-review-paused
+.docket/
