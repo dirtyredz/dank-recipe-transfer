@@ -23,14 +23,19 @@ class ReleaseJarGuard {
     }
 
     static void validateJarSpec(Object spec) {
-        if (!(spec instanceof Map) || spec.keySet().any { !(it in ['requiredEntries', 'manifestContains', 'entryContains']) }) {
+        if (!(spec instanceof Map) || spec.keySet().any { !(it in ['requiredEntries', 'manifestContains', 'entryContains', 'forbiddenEntries', 'manifestExcludes', 'entryEquals']) }) {
             throw new GradleException('Invalid .ci/mod.json jar checks')
         }
-        ['requiredEntries', 'manifestContains'].each { key ->
+        ['requiredEntries', 'manifestContains', 'forbiddenEntries', 'manifestExcludes'].each { key ->
             if (spec.containsKey(key) && (!(spec[key] instanceof List)
                     || spec[key].any { !(it instanceof String) || it.isEmpty() })) {
                 throw new GradleException("Invalid .ci/mod.json jar.${key}")
             }
+        }
+        if (spec.containsKey('entryEquals') && (!(spec.entryEquals instanceof Map)
+                || spec.entryEquals.any { key, value -> !(key instanceof String) || key.isEmpty()
+                    || !(value instanceof String) || value.isEmpty() })) {
+            throw new GradleException('Invalid .ci/mod.json jar.entryEquals')
         }
         if (spec.containsKey('entryContains') && (!(spec.entryContains instanceof List)
                 || spec.entryContains.any { !(it instanceof Map) || it.keySet() != (['entry', 'contains'] as Set)
@@ -45,6 +50,24 @@ class ReleaseJarGuard {
         validateJarSpec(jarSpec)
         if (jar.name != expectedName) throw new GradleException("Unexpected release filename: ${jar.name}")
         new ZipFile(jar).withCloseable { zip ->
+            (jarSpec.entryEquals ?: [:]).each { name, expected ->
+                def entry = zip.getEntry(name)
+                if (!entry || entry.directory) throw new GradleException("Missing required jar entry: ${name}")
+                def content = zip.getInputStream(entry).withCloseable { it.getText('UTF-8') }
+                if (content.replace('\r\n', '\n').trim() != expected.replace('\r\n', '\n').trim()) {
+                    throw new GradleException("Jar entry ${name} differs from expected text")
+                }
+            }
+            if (jarSpec.manifestExcludes) {
+                def entry = zip.getEntry('META-INF/MANIFEST.MF')
+                if (!entry) throw new GradleException('Missing required jar entry: META-INF/MANIFEST.MF')
+                def content = zip.getInputStream(entry).withCloseable { it.getText('UTF-8') }
+                jarSpec.manifestExcludes.each { forbidden ->
+                    if (content.toLowerCase(Locale.ROOT).contains(forbidden.toLowerCase(Locale.ROOT))) {
+                        throw new GradleException("Forbidden manifest text: ${forbidden}")
+                    }
+                }
+            }
             (jarSpec.requiredEntries ?: []).each { name ->
                 def entry = zip.getEntry(name)
                 if (!entry || entry.directory) throw new GradleException("Missing required jar entry: ${name}")
@@ -56,7 +79,7 @@ class ReleaseJarGuard {
                 def entry = zip.getEntry(check.entry)
                 if (!entry || entry.directory) throw new GradleException("Missing required jar entry: ${check.entry}")
                 def content = zip.getInputStream(entry).withCloseable { it.getText('UTF-8') }
-                if (!content.contains(check.contains)) {
+                if (!content.replace('\r\n', '\n').contains(check.contains.replace('\r\n', '\n'))) {
                     throw new GradleException("Jar entry ${check.entry} does not contain: ${check.contains}")
                 }
             }
@@ -71,6 +94,10 @@ class ReleaseJarGuard {
             zip.entries().each { entry ->
                 String name = entry.name
                 if (entry.directory) return
+                if ((jarSpec.forbiddenEntries ?: []).any { pattern ->
+                    org.apache.tools.ant.types.selectors.SelectorUtils.matchPath(
+                            pattern.replace('/', File.separator), name.replace('/', File.separator), true)
+                }) throw new GradleException("Forbidden jar entry: ${name}")
                 if (name.endsWith('.class')) {
                     if (!name.startsWith(packagePath + '/') || !mainClasses.contains(name)) {
                         throw new GradleException("Non-main class in release jar: ${name}")
@@ -106,7 +133,10 @@ tasks.register('testReleaseJarVerifier') {
                     'fixture.refmap.json': '{"method":"m_123_"}']
         def jarSpec = [requiredEntries: ['META-INF/LICENSE'],
                        manifestContains: ['MixinConfigs: fixture.mixins.json'],
-                       entryContains: [[entry: 'fixture.refmap.json', contains: 'm_']]]
+                       entryContains: [[entry: 'fixture.refmap.json', contains: 'm_']],
+                       forbiddenEntries: ['vendor/**', 'external/api/**', '**/*.mixins.json'],
+                       manifestExcludes: ['Premain-Class:', 'Agent-Class:'],
+                       entryEquals: ['META-INF/LICENSE': 'MIT']]
         def cases = [clean: [:], samePackageGameTest: ['example/mod/HiddenTest.class': 'test'],
                      foreignClass: ['other/Main.class': 'test'], nestedJar: ['META-INF/jarjar/dependency.jar': 'test'],
                      testResource: ['data/fixture/structures/empty.nbt': 'test'],
@@ -119,6 +149,12 @@ tasks.register('testReleaseJarVerifier') {
                      missingMetadata: [:], wrongFilename: [:], missingRequired: [:], missingManifest: [:],
                      wrongManifest: ['META-INF/MANIFEST.MF': 'Manifest-Version: 1.0\n'],
                      missingRefmap: [:], wrongRefmap: ['fixture.refmap.json': '{"method":"officialName"}'],
+                     forbiddenPrefix: ['vendor/Stub.class': 'stub'],
+                     forbiddenNestedPrefix: ['external/api/Stub.class': 'stub'],
+                     forbiddenMixin: ['fixture.mixins.json': '{}'],
+                     forbiddenPremain: ['META-INF/MANIFEST.MF': 'Premain-Class: Agent\n'],
+                     forbiddenAgent: ['META-INF/MANIFEST.MF': 'agent-class: Agent\n'],
+                     wrongExact: ['META-INF/LICENSE': 'MIT plus unexpected text'],
                      noCustomChecks: [:]]
         cases.each { label, extra ->
             def entries = base + extra
@@ -148,14 +184,22 @@ tasks.register('testReleaseJarVerifier') {
                 missingManifest: 'Missing required jar entry: META-INF/MANIFEST.MF',
                 wrongManifest: 'Jar entry META-INF/MANIFEST.MF does not contain: MixinConfigs: fixture.mixins.json',
                 missingRefmap: 'Missing required jar entry: fixture.refmap.json',
-                wrongRefmap: 'Jar entry fixture.refmap.json does not contain: m_']
+                wrongRefmap: 'Jar entry fixture.refmap.json does not contain: m_',
+                forbiddenPrefix: 'Forbidden jar entry: vendor/Stub.class',
+                forbiddenNestedPrefix: 'Forbidden jar entry: external/api/Stub.class',
+                forbiddenMixin: 'Forbidden jar entry: fixture.mixins.json',
+                forbiddenPremain: 'Forbidden manifest text: Premain-Class:',
+                forbiddenAgent: 'Forbidden manifest text: Agent-Class:',
+                wrongExact: 'Jar entry META-INF/LICENSE differs from expected text']
             if (expectedFailures.containsKey(label) && failure != expectedFailures[label]) {
                 throw new GradleException("Unexpected jar guard failure for ${label}: ${failure}")
             }
             logger.lifecycle("Jar guard ${label}: ${failure ?: 'PASS'}")
         }
         [null, [], [unknown: []], [requiredEntries: 'LICENSE'], [requiredEntries: ['']],
-         [manifestContains: [42]], [entryContains: null], [entryContains: ['refmap']],
+         [manifestContains: [42]], [forbiddenEntries: 'prefix'], [forbiddenEntries: ['']],
+         [manifestExcludes: [42]], [entryEquals: []], [entryEquals: [name: 42]],
+         [entryContains: null], [entryContains: ['refmap']],
          [entryContains: [[entry: 'refmap']]], [entryContains: [[entry: 'refmap', contains: '']]]].each { invalid ->
             String failure = null
             try { ReleaseJarGuard.validateJarSpec(invalid) }
