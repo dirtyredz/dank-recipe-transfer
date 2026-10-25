@@ -3,5 +3,25 @@
   "mainPackage": "io.github.dirtyredz.danktransfer",
   "datagen": false,
   "gametests": true,
-  "packSide": "both"
+  "packSide": "both",
+  "jar": {
+    "requiredEntries": [
+      "dank_recipe_transfer.mixins.json",
+      "META-INF/MANIFEST.MF",
+      "META-INF/LICENSE"
+    ],
+    "manifestContains": [
+      "MixinConfigs: dank_recipe_transfer.mixins.json"
+    ],
+    "entryContains": [
+      {
+        "entry": "dank_recipe_transfer.mixins.json",
+        "contains": "io.github.dirtyredz.danktransfer.compat.MixinGate"
+      },
+      {
+        "entry": "META-INF/LICENSE",
+        "contains": "MIT License"
+      }
+    ]
+  }
 }

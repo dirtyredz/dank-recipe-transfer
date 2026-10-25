@@ -104,9 +104,10 @@ Local fast gate: `./gradlew --offline test build verifyReleaseJar` with cached d
 Shared files are checked from the workspace with `tools/sync-mod-files.ps1 -Check -Mod <this-worktree>`.
 
 CI sets `datagen: false` (no generator) and `gametests: true` (the real Forge suite against Dank Storage).
-The shared jar guard checks metadata and excludes non-main classes/test resources. Before release,
-also inspect the existing `dank_recipe_transfer.mixins.json`, manifest activation and `META-INF/LICENSE`;
-the template has no mod-specific jar-check hook.
+The shared `verifyReleaseJar` guard checks metadata and excludes non-main classes/test resources.
+It also enforces the mixin config and its optional-viewer gate, manifest activation and MIT license
+declared in `.ci/mod.json` (`requiredEntries`, `manifestContains`, `entryContains`). These automated
+checks are authoritative in both the local fast gate and hosted CI.
 
 ## Source pins
 

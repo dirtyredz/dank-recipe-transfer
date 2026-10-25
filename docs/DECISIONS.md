@@ -7,7 +7,9 @@ owner-authorized release dispatch after green main CI verifies, builds, drafts, 
 and publishes immutable assets. Gradle resolves the exact release manifest beside the staged jar.
 
 No datagen exists. Real Forge GameTests against Dank Storage gate release; the shared world helper
-stages their flat world. Existing manual mixin/manifest/license inspection remains a release step.
+stages their flat world. The shared `verifyReleaseJar` guard enforces the mixin config and its
+optional-viewer gate, manifest activation and MIT license declared in `.ci/mod.json`, replacing
+the manual release checklist.
 
 Newest first.
 

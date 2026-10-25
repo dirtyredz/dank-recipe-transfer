@@ -29,37 +29,63 @@ export function prepareAssets(m, dir, root, server, repo) {
   fs.writeFileSync(path.join(dir, m.modId + '.pw.toml'),
     `name = ${q(m.name)}\nfilename = ${q(m.jarFilename)}\nside = ${q(m.side)}\n\n[download]\nurl = ${q(url)}\nhash-format = "sha256"\nhash = ${q(digest)}\n`);
 }
-export function releasePolicy(m, releases, refs) {
+export function releasePolicy(m, releases, refs, sha) {
   validateManifest(m);
-  requireThat(releases.every(r => r.tag_name !== m.tag), 'Release already exists: ' + m.tag);
-  requireThat(refs.every(r => r.ref !== 'refs/tags/' + m.tag), 'Tag already exists: ' + m.tag);
+  const matches = releases.filter(r => r.tag_name === m.tag);
+  requireThat(matches.length === 0 || (matches.length === 1 && matches[0].draft === true), 'Expected exactly one private draft');
+  const tags = refs.filter(r => r.ref === 'refs/tags/' + m.tag);
+  requireThat(tags.length === 0 || (tags.length === 1 && /^[0-9a-f]{40}$/.test(sha)
+    && tags[0].object?.type === 'commit' && tags[0].object.sha === sha), 'Existing tag must point at exact built commit');
+  requireThat(matches.length === 0 || tags.length === 1, 'Cannot resume draft without matching tag');
   const numeric = tag => {
     requireThat(/^v\d+\.\d+\.\d+$/.test(tag), 'Cannot order stable release: ' + tag);
     return tag.slice(1).split('.').map(BigInt);
   };
   const greater = (a, b) => { for (let i = 0; i < 3; i++) if (a[i] !== b[i]) return a[i] > b[i]; return false; };
   const stable = releases.filter(r => !r.draft && !r.prerelease);
-  return { latest: !m.prerelease && stable.every(r => greater(numeric(m.tag), numeric(r.tag_name))) };
+  return { latest: !m.prerelease && stable.every(r => greater(numeric(m.tag), numeric(r.tag_name))),
+    draft: matches[0], tagExists: tags.length === 1 };
 }
-export function publishRelease(m, dir, root, repo, sha, gh) {
+export function publishRelease(m, dir, root, repo, sha, gh,
+  sleep = ms => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms)) {
   validateManifest(m);
   requireThat(/^[0-9a-f]{40}$/.test(sha), 'Expected exact built commit');
   const notesFile = notes(m, root);
   const list = () => JSON.parse(gh('api', '--paginate', '--slurp', `repos/${repo}/releases?per_page=100`)).flat();
   const releases = list();
   const refs = JSON.parse(gh('api', `repos/${repo}/git/matching-refs/tags/${m.tag}`));
-  const { latest } = releasePolicy(m, releases, refs);
+  // Peel annotated tags to the commit; only this exact tag matters, not prefix matches.
+  for (const ref of refs.filter(r => r.ref === 'refs/tags/' + m.tag)) {
+    for (let depth = 0; ref.object?.type === 'tag' && depth < 10; depth++) {
+      requireThat(/^[0-9a-f]{40}$/.test(ref.object.sha), 'Invalid annotated tag object');
+      ref.object = JSON.parse(gh('api', `repos/${repo}/git/tags/${ref.object.sha}`)).object;
+    }
+  }
+  const { latest, draft, tagExists } = releasePolicy(m, releases, refs, sha);
   const names = [m.jarFilename, m.jarFilename + '.sha256', m.modId + '.pw.toml'].sort();
   requireThat(JSON.stringify(fs.readdirSync(dir).sort()) === JSON.stringify(names), 'Expected jar, checksum and packwiz assets');
   const expected = new Map(names.map(name => [name, sha256(path.join(dir, name))]));
   requireThat(fs.readFileSync(path.join(dir, m.jarFilename + '.sha256'), 'utf8') === `${expected.get(m.jarFilename)}  ${m.jarFilename}\n`, 'Local jar checksum mismatch');
-  // Create-only API fails on a racing tag; never move an existing ref.
-  gh('api', '--method', 'POST', `repos/${repo}/git/refs`, '-f', 'ref=refs/tags/' + m.tag, '-f', 'sha=' + sha);
-  gh('release', 'create', m.tag, ...names.map(name => path.join(dir, name)), '--verify-tag', '--draft', '--latest=false',
-    ...(m.prerelease ? ['--prerelease'] : []), '--title', m.tag, '--notes-file', notesFile);
-  const matches = list().filter(r => r.tag_name === m.tag);
-  requireThat(matches.length === 1 && matches[0].draft, 'Expected exactly one private draft');
-  const release = matches[0];
+  if (!tagExists) {
+    // Create-only API fails on a racing tag; never move an existing ref.
+    gh('api', '--method', 'POST', `repos/${repo}/git/refs`, '-f', 'ref=refs/tags/' + m.tag, '-f', 'sha=' + sha);
+  }
+  let release = draft;
+  if (!release) {
+    gh('release', 'create', m.tag, ...names.map(name => path.join(dir, name)), '--verify-tag', '--draft', '--latest=false',
+      ...(m.prerelease ? ['--prerelease'] : []), '--title', m.tag, '--notes-file', notesFile);
+    // Lists can lag creation. Poll only absence; ambiguous/public results fail immediately.
+    for (let attempt = 0; attempt < 10; attempt++) {
+      const matches = list().filter(r => r.tag_name === m.tag);
+      if (matches.length) {
+        requireThat(matches.length === 1 && matches[0].draft === true, 'Expected exactly one private draft');
+        release = matches[0];
+        break;
+      }
+      if (attempt < 9) sleep(3000);
+    }
+    requireThat(release, 'Expected exactly one private draft after 10 read-back attempts');
+  }
   requireThat(JSON.stringify(release.assets.map(a => a.name).sort()) === JSON.stringify(names), 'Unexpected release asset set');
   const readback = fs.mkdtempSync(path.join(root, '.release-readback-'));
   try {

@@ -7,6 +7,13 @@ import java.util.regex.Pattern
 
 apply from: 'gradle/test-world.gradle'
 
+// Publish retries compare exact bytes. ForgeGradle reobfJar consumes this archive in place;
+// it is a RenameJarInPlace task, not an AbstractArchiveTask with these properties.
+tasks.withType(AbstractArchiveTask).configureEach {
+    preserveFileTimestamps = false
+    reproducibleFileOrder = true
+}
+
 // Inspect names against compiled main outputs: reobfuscation changes bytecode, not class paths.
 class ReleaseJarGuard {
     static void verifyGameTestTask(boolean enabled, boolean available) {
