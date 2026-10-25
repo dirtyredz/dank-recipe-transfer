@@ -148,3 +148,7 @@ tasks.named('jar', Jar).configure {
 tasks.withType(JavaCompile).configureEach {
     options.encoding = 'UTF-8'
 }
+
+apply from: 'gradle/gametest-world.gradle'
+
+apply from: 'gradle/verify-release-jar.gradle'

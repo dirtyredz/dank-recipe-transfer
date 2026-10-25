@@ -1,0 +1,134 @@
+import groovy.json.JsonSlurper
+import groovy.json.JsonOutput
+import java.util.zip.ZipFile
+import java.util.zip.ZipEntry
+import java.util.zip.ZipOutputStream
+import java.util.regex.Pattern
+
+apply from: 'gradle/test-world.gradle'
+
+// Inspect names against compiled main outputs: reobfuscation changes bytecode, not class paths.
+class ReleaseJarGuard {
+    static void verify(File jar, String expectedName, String modId, String version,
+                       String packagePath, Set<String> mainClasses, Set<String> testResources, Map worldSpec) {
+        if (jar.name != expectedName) throw new GradleException("Unexpected release filename: ${jar.name}")
+        new ZipFile(jar).withCloseable { zip ->
+            def metadata = zip.getEntry('META-INF/mods.toml')
+            if (!metadata) throw new GradleException('Missing META-INF/mods.toml')
+            def toml = zip.getInputStream(metadata).getText('UTF-8')
+            if (toml.contains('${') || !(toml =~ /(?m)^\s*version\s*=\s*"${Pattern.quote(version)}"\s*$/).find()
+                    || !(toml =~ /(?m)^\s*modId\s*=\s*"${Pattern.quote(modId)}"\s*$/).find()) {
+                throw new GradleException('Unexpanded or incorrect mods.toml version/modId')
+            }
+            int classes = 0
+            zip.entries().each { entry ->
+                String name = entry.name
+                if (entry.directory) return
+                if (name.endsWith('.class')) {
+                    if (!name.startsWith(packagePath + '/') || !mainClasses.contains(name)) {
+                        throw new GradleException("Non-main class in release jar: ${name}")
+                    }
+                    classes++
+                }
+                if (name.toLowerCase(Locale.ROOT).endsWith('.jar')) {
+                    throw new GradleException("Nested jar in release jar: ${name}")
+                }
+                if (testResources.contains(name) || worldSpec.forbiddenTokens.any { name.toLowerCase(Locale.ROOT).contains(it) }
+                        || name.startsWith("data/${worldSpec.namespace}/")
+                        || name == worldSpec.dimensionPath
+                        || name.startsWith(worldSpec.toolingPath)
+                        || name.startsWith("${worldSpec.worldPath}/datapacks/${worldSpec.packName}/")) {
+                    throw new GradleException("Test resource in release jar: ${name}")
+                }
+            }
+            if (classes == 0) throw new GradleException('Release jar contains no main classes')
+        }
+    }
+}
+
+// Cheap regression tests run without Forge or a second build, using the same verifier as the real jar.
+tasks.register('testReleaseJarVerifier') {
+    group = 'verification'
+    doLast {
+        def dir = layout.buildDirectory.dir('ci/jar-guard-tests').get().asFile
+        dir.mkdirs()
+        def base = ['META-INF/mods.toml': 'modId="fixture"\nversion="1.0"\n',
+                    'example/mod/Main.class': 'fixture bytes']
+        def cases = [clean: [:], samePackageGameTest: ['example/mod/HiddenTest.class': 'test'],
+                     foreignClass: ['other/Main.class': 'test'], nestedJar: ['META-INF/jarjar/dependency.jar': 'test'],
+                     testResource: ['data/fixture/structures/empty.nbt': 'test'],
+                     testWorld: [(testWorldSpec.dimensionPath): '{}'],
+                     testNamespace: [("data/${testWorldSpec.namespace}/functions/quiet.mcfunction"): 'test'],
+                     testTooling: [(testWorldSpec.toolingPath + 'fixture.txt'): 'test'],
+                     testPack: [("${testWorldSpec.worldPath}/datapacks/${testWorldSpec.packName}/pack.mcmeta"): '{}'],
+                     testMarker: ['assets/fixture/GameTest.txt': 'test'],
+                     unexpandedVersion: ['META-INF/mods.toml': 'modId="fixture"\nversion="${mod_version}"\n'],
+                     missingMetadata: [:], wrongFilename: [:]]
+        cases.each { label, extra ->
+            def entries = base + extra
+            if (label == 'missingMetadata') entries.remove('META-INF/mods.toml')
+            def jar = new File(dir, label == 'wrongFilename' ? 'wrong.jar' : 'fixture.jar')
+            new ZipOutputStream(new FileOutputStream(jar)).withCloseable { out ->
+                entries.each { path, content ->
+                    out.putNextEntry(new ZipEntry(path)); out.write(content.getBytes('UTF-8')); out.closeEntry()
+                }
+            }
+            String failure = null
+            try {
+                ReleaseJarGuard.verify(jar, 'fixture.jar', 'fixture', '1.0', 'example/mod',
+                        ['example/mod/Main.class'] as Set, ['data/fixture/structures/empty.nbt'] as Set, testWorldSpec)
+            } catch (GradleException e) { failure = e.message }
+            if ((label == 'clean') != (failure == null)) {
+                throw new GradleException("Jar guard regression ${label}: ${failure ?: 'contamination accepted'}")
+            }
+            logger.lifecycle("Jar guard ${label}: ${failure ?: 'PASS'}")
+        }
+    }
+}
+
+tasks.register('verifyReleaseJar') {
+    group = 'verification'
+    description = 'Verify and stage only the final reobfuscated production jar.'
+    dependsOn 'reobfJar', 'testReleaseJarVerifier'
+    dependsOn tasks.matching { it.name == 'testGameTestWorld' }
+    doLast {
+        def config = new JsonSlurper().parse(file('.ci/mod.json'))
+        if (!(config.modId == mod_id && config.mainPackage ==~ /[a-zA-Z_]\w*(\.[a-zA-Z_]\w*)+/
+                && config.datagen instanceof Boolean && config.gametests instanceof Boolean
+                && config.packSide in ['both', 'client', 'server'])) {
+            throw new GradleException('Invalid .ci/mod.json')
+        }
+        def jar = tasks.named('jar', Jar).get().archiveFile.get().asFile
+        def releaseVersion = mod_version.toString()
+        if (!(releaseVersion ==~ /(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:-[0-9A-Za-z.-]+)?/)) {
+            throw new GradleException('Expected semantic mod_version')
+        }
+        def expected = "${config.modId}-${minecraft_version}-${releaseVersion}.jar".toString()
+        def manifest = [modId: config.modId, name: mod_name.toString(), version: releaseVersion,
+                        tag: "v${releaseVersion}".toString(), side: config.packSide, jarFilename: expected,
+                        prerelease: releaseVersion.startsWith('0.') || releaseVersion.contains('-')]
+        Set<String> classes = [] as Set
+        sourceSets.main.output.classesDirs.each { root ->
+            fileTree(root).matching { include '**/*.class' }.visit { detail ->
+                if (!detail.directory) classes.add(detail.relativePath.pathString)
+            }
+        }
+        Set<String> resources = [] as Set
+        def gameTests = sourceSets.findByName('gameTest')
+        gameTests?.resources?.srcDirs?.each { root ->
+            fileTree(root).visit { detail ->
+                if (!detail.directory) resources.add(detail.relativePath.pathString)
+            }
+        }
+        ReleaseJarGuard.verify(jar, expected, config.modId, mod_version.toString(),
+                config.mainPackage.replace('.', '/'), classes, resources, testWorldSpec)
+        // Downstream upload paths cannot accidentally pick a sources/dev jar.
+        project.sync { spec ->
+            spec.from(jar)
+            spec.into(project.layout.buildDirectory.dir('ci/release'))
+        }
+        def manifestFile = layout.buildDirectory.file('ci/release.json').get().asFile
+        manifestFile.setText(JsonOutput.prettyPrint(JsonOutput.toJson(manifest)) + '\n', 'UTF-8')
+        logger.lifecycle("Verified release jar: ${jar.name} (${classes.size()} compiled main classes)")
+    }
+}

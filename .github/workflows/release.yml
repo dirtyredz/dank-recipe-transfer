@@ -1,0 +1,124 @@
+# Releases follow Command Deck's deliberate dispatch model: pushes only run CI.
+# The agent starts this on main with: gh workflow run release.yml --ref main
+# verify + gametest (read-only) -> build (read-only, exact artifact ID) -> publish.
+# Publication refuses reused versions/tags, creates a tag at the built commit, uploads
+# a draft, downloads and hashes every asset, then publishes. No owner hand-publication.
+# Version comes only from gradle.properties; 0.x and hyphenated versions are prereleases.
+# Published bytes are never replaced and latest never moves backward. A failed draft
+# remains private for diagnosis; recovery requires deliberate cleanup, not a blind rerun.
+name: Release
+on:
+  workflow_dispatch:
+
+defaults:
+  run:
+    shell: bash
+
+permissions: {}
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: ./.github/actions/setup-mod-build
+      - name: Verify
+        run: node .ci/scripts/verify.mjs
+
+  gametest:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: ./.github/actions/setup-mod-build
+      # The job succeeds without launching Forge when GameTests are not configured.
+      # Keeping the job in the graph means publish can require every job to succeed.
+      - name: Release GameTests
+        run: |
+          if [[ "$(jq -er '.gametests | tostring' .ci/mod.json)" == true ]]; then
+            chmod +x gradlew
+            ./gradlew runGameTestServer --console=plain 2>&1 | tee gametest.log
+            node .ci/scripts/verify-gametest.mjs gametest.log
+          fi
+      - name: Upload GameTest logs
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: gametest-logs
+          path: |
+            gametest.log
+            run/gametest/logs/
+            run/gametest/crash-reports/
+          if-no-files-found: ignore
+          retention-days: 7
+
+  build:
+    needs: [verify, gametest]
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    outputs:
+      artifact-id: ${{ steps.upload.outputs.artifact-id }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: ./.github/actions/setup-mod-build
+      - name: Build the release artifact
+        run: |
+          chmod +x gradlew
+          ./gradlew build verifyReleaseJar
+      - name: Prepare checksum and packwiz asset
+        run: node .ci/scripts/release.mjs prepare build/ci/release.json build/ci/release
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        id: upload
+        with:
+          name: release-assets
+          path: |
+            build/ci/release.json
+            build/ci/release/*
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    needs: [verify, gametest, build]
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          artifact-ids: ${{ needs.build.outputs.artifact-id }}
+          merge-multiple: true
+          path: build/ci
+      - name: Refuse reuse, draft, read back and publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: node .ci/scripts/release.mjs publish build/ci/release.json build/ci/release

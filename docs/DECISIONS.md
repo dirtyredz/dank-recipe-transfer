@@ -1,5 +1,14 @@
 # Decisions
 
+## 2026-10-25 - Shared hosted CI and deliberate releases
+
+Adopt the workspace template as byte-identical standalone files. Pushes verify without publishing;
+owner-authorized release dispatch after green main CI verifies, builds, drafts, hashes readback
+and publishes immutable assets. Gradle resolves the exact release manifest beside the staged jar.
+
+No datagen exists. Real Forge GameTests against Dank Storage gate release; the shared world helper
+stages their flat world. Existing manual mixin/manifest/license inspection remains a release step.
+
 Newest first.
 
 ## 2026-10-20 — Accept CraftingMenu subclasses with the vanilla layout; answer every subscription

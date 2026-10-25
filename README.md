@@ -88,12 +88,25 @@ git diff --check
 
 ## Release
 
-1. Bump `mod_version` in `gradle.properties` (the only place the version lives).
-2. `./gradlew test build runGameTestServer`, then inspect the jar (mods.toml, mixin config,
-   `META-INF/LICENSE`, no `io/github/dirtyredz/danktransfer/*GameTests*` classes, no `mezz/`,
-   `dev/emi/` or `tfar/` classes).
-3. Tag `v<version>` and attach the jar to an immutable GitHub release (prerelease first).
-4. Packs reference the release asset by URL and SHA-256, `side = "both"`.
+The version lives only in `gradle.properties`. Prepare non-empty `docs/releases/<version>.md`
+for a release, then obtain the owner's go-ahead to push and land on main. Push CI runs
+`./gradlew test build verifyReleaseJar`; it publishes nothing.
+After green main CI and owner authorization, the agent dispatches
+`gh workflow run release.yml --ref main`. The workflow verifies again, requires successful Forge GameTests, builds
+the final jar, creates its version tag, uploads a draft, reads every asset back and compares
+SHA-256 before publishing the jar, its `.sha256` and `dank_recipe_transfer.pw.toml`.
+The pack session consumes the published `.pw.toml`; the owner never publishes by hand.
+Versions starting with `0.` or containing `-` are prereleases. Existing releases/tags are
+refused, published bytes are never replaced, and stable latest never moves backward.
+A failed draft requires deliberate recovery before retrying.
+
+Local fast gate: `./gradlew --offline test build verifyReleaseJar` with cached dependencies.
+Shared files are checked from the workspace with `tools/sync-mod-files.ps1 -Check -Mod <this-worktree>`.
+
+CI sets `datagen: false` (no generator) and `gametests: true` (the real Forge suite against Dank Storage).
+The shared jar guard checks metadata and excludes non-main classes/test resources. Before release,
+also inspect the existing `dank_recipe_transfer.mixins.json`, manifest activation and `META-INF/LICENSE`;
+the template has no mod-specific jar-check hook.
 
 ## Source pins
 

@@ -1,0 +1,9 @@
+// One definition for world staging and forbidden release resources. Idempotent: both helpers apply it.
+if (!project.ext.has('testWorldSpec')) {
+    def packName = 'mod_test_world'
+    def toolingPath = 'tools/test-world/'
+    ext.testWorldSpec = [packName: packName, sourcePath: toolingPath + 'datapack',
+                        worldPath: 'world', namespace: packName,
+                        dimensionPath: 'data/minecraft/dimension/overworld.json',
+                        forbiddenTokens: ['gametest'], toolingPath: toolingPath]
+}

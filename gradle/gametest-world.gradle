@@ -1,0 +1,54 @@
+apply from: 'gradle/test-world.gradle'
+
+// Every GameTest JVM (runGameTestServer and the qualification phases) is a Forge dedicated server, and a
+// dedicated server creates its world from server.properties. Without one it generates normal terrain, so the
+// plots at y = -60 sit in caves: gravel falls into them, water and lava flow in, and cave mobs walk through.
+// A superflat world with no natural spawning or structures gives each plot only what its test builds.
+// Only a new world reads these settings; an existing world (a save-upgrade fixture) keeps its own generator.
+ext.gameTestWorld = { File dir, String modId = mod_id.toString() ->
+    dir.mkdirs()
+    def pack = file(testWorldSpec.sourcePath)
+    if (!new File(pack, 'pack.mcmeta').isFile()) throw new GradleException('Missing standalone test-world datapack')
+    project.sync { spec ->
+        spec.from(pack)
+        spec.into(new File(dir, "${testWorldSpec.worldPath}/datapacks/${testWorldSpec.packName}"))
+    }
+    new File(dir, 'server.properties').text = [
+            'level-type=minecraft\\:flat',
+            'generate-structures=false',
+            'spawn-monsters=false',
+            'spawn-animals=false',
+            'spawn-npcs=false',
+            "initial-enabled-packs=vanilla,mod:forge,mod:${modId},file/${testWorldSpec.packName}",
+    ].join('\n') + '\n'
+}
+
+tasks.register('testGameTestWorld') {
+    group = 'verification'
+    doLast {
+        // A different id catches accidental Roundwood coupling without booting Forge.
+        def dir = layout.buildDirectory.dir('ci/world-staging-test').get().asFile
+        project.delete(dir)
+        def world = new File(dir, testWorldSpec.worldPath)
+        world.mkdirs()
+        def existingSave = new File(world, 'level.dat')
+        existingSave.text = 'existing save must survive staging'
+        gameTestWorld(dir, 'fixture_mod')
+        def properties = new Properties()
+        new File(dir, 'server.properties').withInputStream { properties.load(it) }
+        assert properties.getProperty('initial-enabled-packs') == "vanilla,mod:forge,mod:fixture_mod,file/${testWorldSpec.packName}"
+        assert properties.getProperty('level-type') == 'minecraft:flat'
+        assert existingSave.text == 'existing save must survive staging'
+        fileTree(file(testWorldSpec.sourcePath)).visit { detail ->
+            if (!detail.directory) {
+                def staged = new File(world, "datapacks/${testWorldSpec.packName}/${detail.relativePath.pathString}")
+                assert staged.bytes == detail.file.bytes
+            }
+        }
+        logger.lifecycle('GameTest world staging: alternate mod id, pack bytes, existing save PASS')
+    }
+}
+tasks.matching { it.name == 'runGameTestServer' }.configureEach { task ->
+    // The run configuration owns the working directory; the task only adopts it when it executes.
+    task.doFirst { gameTestWorld(file(minecraft.runs.gameTestServer.workingDirectory)) }
+}

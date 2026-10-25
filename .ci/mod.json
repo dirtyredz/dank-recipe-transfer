@@ -1,0 +1,7 @@
+{
+  "modId": "dank_recipe_transfer",
+  "mainPackage": "io.github.dirtyredz.danktransfer",
+  "datagen": false,
+  "gametests": true,
+  "packSide": "both"
+}
