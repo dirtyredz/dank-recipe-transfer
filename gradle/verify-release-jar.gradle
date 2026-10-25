@@ -9,10 +9,50 @@ apply from: 'gradle/test-world.gradle'
 
 // Inspect names against compiled main outputs: reobfuscation changes bytecode, not class paths.
 class ReleaseJarGuard {
+    static void verifyGameTestTask(boolean enabled, boolean available) {
+        if (enabled && !available) {
+            throw new GradleException('.ci/mod.json gametests is true but runGameTestServer task is missing')
+        }
+    }
+
+    static void validateJarSpec(Object spec) {
+        if (!(spec instanceof Map) || spec.keySet().any { !(it in ['requiredEntries', 'manifestContains', 'entryContains']) }) {
+            throw new GradleException('Invalid .ci/mod.json jar checks')
+        }
+        ['requiredEntries', 'manifestContains'].each { key ->
+            if (spec.containsKey(key) && (!(spec[key] instanceof List)
+                    || spec[key].any { !(it instanceof String) || it.isEmpty() })) {
+                throw new GradleException("Invalid .ci/mod.json jar.${key}")
+            }
+        }
+        if (spec.containsKey('entryContains') && (!(spec.entryContains instanceof List)
+                || spec.entryContains.any { !(it instanceof Map) || it.keySet() != (['entry', 'contains'] as Set)
+                    || !(it.entry instanceof String) || it.entry.isEmpty()
+                    || !(it.contains instanceof String) || it.contains.isEmpty() })) {
+            throw new GradleException('Invalid .ci/mod.json jar.entryContains')
+        }
+    }
+
     static void verify(File jar, String expectedName, String modId, String version,
-                       String packagePath, Set<String> mainClasses, Set<String> testResources, Map worldSpec) {
+                       String packagePath, Set<String> mainClasses, Set<String> testResources, Map worldSpec, Map jarSpec = [:]) {
+        validateJarSpec(jarSpec)
         if (jar.name != expectedName) throw new GradleException("Unexpected release filename: ${jar.name}")
         new ZipFile(jar).withCloseable { zip ->
+            (jarSpec.requiredEntries ?: []).each { name ->
+                def entry = zip.getEntry(name)
+                if (!entry || entry.directory) throw new GradleException("Missing required jar entry: ${name}")
+            }
+            def contentChecks = (jarSpec.entryContains ?: []) + (jarSpec.manifestContains ?: []).collect {
+                [entry: 'META-INF/MANIFEST.MF', contains: it]
+            }
+            contentChecks.each { check ->
+                def entry = zip.getEntry(check.entry)
+                if (!entry || entry.directory) throw new GradleException("Missing required jar entry: ${check.entry}")
+                def content = zip.getInputStream(entry).withCloseable { it.getText('UTF-8') }
+                if (!content.contains(check.contains)) {
+                    throw new GradleException("Jar entry ${check.entry} does not contain: ${check.contains}")
+                }
+            }
             def metadata = zip.getEntry('META-INF/mods.toml')
             if (!metadata) throw new GradleException('Missing META-INF/mods.toml')
             def toml = zip.getInputStream(metadata).getText('UTF-8')
@@ -53,7 +93,13 @@ tasks.register('testReleaseJarVerifier') {
         def dir = layout.buildDirectory.dir('ci/jar-guard-tests').get().asFile
         dir.mkdirs()
         def base = ['META-INF/mods.toml': 'modId="fixture"\nversion="1.0"\n',
-                    'example/mod/Main.class': 'fixture bytes']
+                    'example/mod/Main.class': 'fixture bytes',
+                    'META-INF/LICENSE': 'MIT',
+                    'META-INF/MANIFEST.MF': 'MixinConfigs: fixture.mixins.json\n',
+                    'fixture.refmap.json': '{"method":"m_123_"}']
+        def jarSpec = [requiredEntries: ['META-INF/LICENSE'],
+                       manifestContains: ['MixinConfigs: fixture.mixins.json'],
+                       entryContains: [[entry: 'fixture.refmap.json', contains: 'm_']]]
         def cases = [clean: [:], samePackageGameTest: ['example/mod/HiddenTest.class': 'test'],
                      foreignClass: ['other/Main.class': 'test'], nestedJar: ['META-INF/jarjar/dependency.jar': 'test'],
                      testResource: ['data/fixture/structures/empty.nbt': 'test'],
@@ -63,10 +109,19 @@ tasks.register('testReleaseJarVerifier') {
                      testPack: [("${testWorldSpec.worldPath}/datapacks/${testWorldSpec.packName}/pack.mcmeta"): '{}'],
                      testMarker: ['assets/fixture/GameTest.txt': 'test'],
                      unexpandedVersion: ['META-INF/mods.toml': 'modId="fixture"\nversion="${mod_version}"\n'],
-                     missingMetadata: [:], wrongFilename: [:]]
+                     missingMetadata: [:], wrongFilename: [:], missingRequired: [:], missingManifest: [:],
+                     wrongManifest: ['META-INF/MANIFEST.MF': 'Manifest-Version: 1.0\n'],
+                     missingRefmap: [:], wrongRefmap: ['fixture.refmap.json': '{"method":"officialName"}'],
+                     noCustomChecks: [:]]
         cases.each { label, extra ->
             def entries = base + extra
             if (label == 'missingMetadata') entries.remove('META-INF/mods.toml')
+            if (label == 'missingRequired') entries.remove('META-INF/LICENSE')
+            if (label == 'missingManifest') entries.remove('META-INF/MANIFEST.MF')
+            if (label == 'missingRefmap') entries.remove('fixture.refmap.json')
+            if (label == 'noCustomChecks') {
+                ['META-INF/LICENSE', 'META-INF/MANIFEST.MF', 'fixture.refmap.json'].each { entries.remove(it) }
+            }
             def jar = new File(dir, label == 'wrongFilename' ? 'wrong.jar' : 'fixture.jar')
             new ZipOutputStream(new FileOutputStream(jar)).withCloseable { out ->
                 entries.each { path, content ->
@@ -76,12 +131,42 @@ tasks.register('testReleaseJarVerifier') {
             String failure = null
             try {
                 ReleaseJarGuard.verify(jar, 'fixture.jar', 'fixture', '1.0', 'example/mod',
-                        ['example/mod/Main.class'] as Set, ['data/fixture/structures/empty.nbt'] as Set, testWorldSpec)
+                        ['example/mod/Main.class'] as Set, ['data/fixture/structures/empty.nbt'] as Set, testWorldSpec,
+                        label == 'noCustomChecks' ? [:] : jarSpec)
             } catch (GradleException e) { failure = e.message }
-            if ((label == 'clean') != (failure == null)) {
+            if ((label in ['clean', 'noCustomChecks']) != (failure == null)) {
                 throw new GradleException("Jar guard regression ${label}: ${failure ?: 'contamination accepted'}")
             }
+            def expectedFailures = [missingRequired: 'Missing required jar entry: META-INF/LICENSE',
+                missingManifest: 'Missing required jar entry: META-INF/MANIFEST.MF',
+                wrongManifest: 'Jar entry META-INF/MANIFEST.MF does not contain: MixinConfigs: fixture.mixins.json',
+                missingRefmap: 'Missing required jar entry: fixture.refmap.json',
+                wrongRefmap: 'Jar entry fixture.refmap.json does not contain: m_']
+            if (expectedFailures.containsKey(label) && failure != expectedFailures[label]) {
+                throw new GradleException("Unexpected jar guard failure for ${label}: ${failure}")
+            }
             logger.lifecycle("Jar guard ${label}: ${failure ?: 'PASS'}")
+        }
+        [null, [], [unknown: []], [requiredEntries: 'LICENSE'], [requiredEntries: ['']],
+         [manifestContains: [42]], [entryContains: null], [entryContains: ['refmap']],
+         [entryContains: [[entry: 'refmap']]], [entryContains: [[entry: 'refmap', contains: '']]]].each { invalid ->
+            String failure = null
+            try { ReleaseJarGuard.validateJarSpec(invalid) }
+            catch (GradleException e) { failure = e.message }
+            if (!failure?.startsWith('Invalid .ci/mod.json jar')) {
+                throw new GradleException("Invalid jar configuration accepted: ${invalid}")
+            }
+        }
+        [false, true].each { enabled ->
+            [false, true].each { available ->
+                String failure = null
+                try { ReleaseJarGuard.verifyGameTestTask(enabled, available) }
+                catch (GradleException e) { failure = e.message }
+                if ((enabled && !available) != (failure != null)) {
+                    throw new GradleException("GameTest task guard regression: enabled=${enabled}, available=${available}")
+                }
+                if (failure && !failure.contains('runGameTestServer')) throw new GradleException(failure)
+            }
         }
     }
 }
@@ -99,6 +184,9 @@ tasks.register('verifyReleaseJar') {
             throw new GradleException('Invalid .ci/mod.json')
         }
         def jar = tasks.named('jar', Jar).get().archiveFile.get().asFile
+        ReleaseJarGuard.verifyGameTestTask(config.gametests, tasks.findByName('runGameTestServer') != null)
+        def jarSpec = config.containsKey('jar') ? config.jar : [:]
+        ReleaseJarGuard.validateJarSpec(jarSpec)
         def releaseVersion = mod_version.toString()
         if (!(releaseVersion ==~ /(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:-[0-9A-Za-z.-]+)?/)) {
             throw new GradleException('Expected semantic mod_version')
@@ -121,7 +209,7 @@ tasks.register('verifyReleaseJar') {
             }
         }
         ReleaseJarGuard.verify(jar, expected, config.modId, mod_version.toString(),
-                config.mainPackage.replace('.', '/'), classes, resources, testWorldSpec)
+                config.mainPackage.replace('.', '/'), classes, resources, testWorldSpec, jarSpec)
         // Downstream upload paths cannot accidentally pick a sources/dev jar.
         project.sync { spec ->
             spec.from(jar)
