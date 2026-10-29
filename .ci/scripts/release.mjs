@@ -3,30 +3,40 @@ import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
-import { checkReleaseBranch, loadProfiles, releaseIdentity, releaseLine } from './build-profile.mjs';
+import { checkReleaseBranch, loadProfiles, releaseIdentity, resolveProfile } from './build-profile.mjs';
 
 const sha256 = file => createHash('sha256').update(fs.readFileSync(file)).digest('hex');
 const requireThat = (condition, message) => { if (!condition) throw Error(message); };
-// A manifest without a profile is the historical Forge line: v<version> tags, unqualified jars.
+// A manifest without profile fields predates profiles and resolves through the table's default.
 export function manifestProfile(m, table = loadProfiles()) {
   if (m.profile === undefined) {
     requireThat([m.loader, m.minecraft, m.identity, m.releaseBranch].every(v => v === undefined), 'Partial release profile');
-    return { name: 'legacy', identity: 'legacy', loader: 'forge', repositoryLatest: true, releaseBranch: 'main' };
+    return resolveProfile({}, table);
   }
-  const p = table.profiles[m.profile];
-  requireThat(p && p.loader === m.loader && p.minecraft === m.minecraft && p.identity === m.identity
-    && typeof m.releaseBranch === 'string' && m.releaseBranch, 'Manifest does not match build profile ' + m.profile);
-  return { name: m.profile, ...p, releaseBranch: m.releaseBranch };
+  requireThat(typeof m.releaseBranch === 'string' && m.releaseBranch,
+    'Manifest does not match build profile ' + m.profile);
+  let profile;
+  try { profile = resolveProfile({profile: m.profile, releaseBranch: m.releaseBranch}, table); }
+  catch { throw Error('Manifest does not match build profile ' + m.profile); }
+  requireThat(profile.loader === m.loader && profile.minecraft === m.minecraft && profile.identity === m.identity,
+    'Manifest does not match build profile ' + m.profile);
+  return profile;
 }
 export function validateManifest(m) {
   requireThat(/^[a-z][a-z0-9_]*$/.test(m.modId) && typeof m.name === 'string' && m.name.trim(), 'Invalid mod identity');
   requireThat(/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-[0-9A-Za-z.-]+)?$/.test(m.version), 'Expected semantic mod_version');
   const profile = manifestProfile(m);
-  const identity = profile.name === 'legacy' ? { tag: 'v' + m.version } : releaseIdentity(profile, m.modId, m.version);
-  requireThat(!identity.jarFilename || m.jarFilename === identity.jarFilename, 'Invalid release jar identity');
+  const identity = releaseIdentity(profile, m.modId, m.version);
+  requireThat(m.jarFilename === identity.jarFilename, 'Invalid release jar identity');
   requireThat(m.tag === identity.tag && m.prerelease === (m.version.startsWith('0.') || m.version.includes('-')), 'Invalid resolved release policy');
   requireThat(['both', 'client', 'server'].includes(m.side) && /^[A-Za-z0-9_.+-]+\.jar$/.test(m.jarFilename), 'Invalid release asset identity');
   return m;
+}
+/** The release line a tag belongs to: "legacy" for v<version>, else <loader>-<minecraft>. */
+export function releaseLine(tag) {
+  const qualified = /^([a-z]+)-(\d+\.\d+(?:\.\d+)?)-v(.+)$/.exec(tag);
+  return qualified ? { line: `${qualified[1]}-${qualified[2]}`, version: qualified[3] }
+    : { line: 'legacy', version: tag.startsWith('v') ? tag.slice(1) : tag };
 }
 function notes(m, root) {
   const file = path.join(root, 'docs/releases', m.version + '.md');

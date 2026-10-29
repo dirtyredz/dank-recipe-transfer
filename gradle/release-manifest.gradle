@@ -1,0 +1,41 @@
+import groovy.json.JsonSlurper
+
+apply from: 'gradle/build-profile.gradle'
+
+// Assemble the release policy once after the JavaScript resolver has selected the profile and
+// computed the exact tag/jar identity. Jar validation and staging remain in verify-release-jar.gradle.
+ext.releaseManifest = { Map config ->
+    def releaseVersion = mod_version.toString()
+    if (!(releaseVersion ==~ /(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:-[0-9A-Za-z.-]+)?/)) {
+        throw new GradleException('Expected semantic mod_version')
+    }
+    [modId: config.modId, name: mod_name.toString(), version: releaseVersion,
+     tag: releaseIdentity.tag, side: config.packSide, jarFilename: releaseIdentity.jarFilename,
+     prerelease: releaseVersion.startsWith('0.') || releaseVersion.contains('-'),
+     profile: buildProfile.name, loader: buildProfile.loader, minecraft: buildProfile.minecraft,
+     identity: buildProfile.identity, releaseBranch: buildProfile.releaseBranch,
+     sourceSha: sourceCommit(), provenance: portProvenance()]
+}
+
+// The exact commit the jar was built from: CI's GITHUB_SHA, else the local checkout's HEAD.
+ext.sourceCommit = { ->
+    def sha = System.getenv('GITHUB_SHA')
+    if (!sha) {
+        try {
+            def process = ['git', 'rev-parse', 'HEAD'].execute(null, projectDir)
+            sha = process.waitFor() == 0 ? process.text.trim() : null
+        } catch (IOException ignored) { sha = null }
+    }
+    return sha ==~ /[0-9a-f]{40}/ ? sha : null
+}
+
+// Optional .ci/port-provenance.json (fork/branch ancestry and dependency evidence) travels with the manifest.
+ext.portProvenance = { ->
+    def provenance = file('.ci/port-provenance.json')
+    if (!provenance.isFile()) return null
+    def parsed = new JsonSlurper().parse(provenance)
+    if (!(parsed instanceof Map) || !parsed.branchStart || !parsed.baseline) {
+        throw new GradleException('.ci/port-provenance.json needs branchStart and baseline')
+    }
+    return parsed
+}

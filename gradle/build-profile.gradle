@@ -1,37 +1,24 @@
 import groovy.json.JsonSlurper
 
-// The mod's loader/Minecraft/Java profile, read from the same JSON the CI scripts use
-// (.ci/build-profiles.json, selected by .ci/mod.json "profile"; absent = the legacy Forge default).
-// Idempotent: every shared helper applies it. Inconsistent declarations fail the build.
+// Node is already a CI prerequisite. Keep Gradle a thin consumer of the one profile resolver rather
+// than reimplementing defaults, branch rules, table validation or release-identity formulas here.
 if (!project.ext.has('buildProfile')) {
-    def table = new JsonSlurper().parse(file('.ci/build-profiles.json'))
-    def config = new JsonSlurper().parse(file('.ci/mod.json'))
-    def name = config.containsKey('profile') ? config.profile : table.default
-    def selected = (name instanceof String) ? table.profiles[name] : null
-    if (!(selected instanceof Map)) throw new GradleException("Unknown build profile: ${name}")
-    def releaseBranch = config.containsKey('releaseBranch') ? config.releaseBranch : 'main'
-    if (!(releaseBranch instanceof String) || !(releaseBranch ==~ /[A-Za-z0-9._-]+(\/[A-Za-z0-9._-]+)*/)
-            || releaseBranch.split('/').any { it in ['.', '..'] }) {
-        throw new GradleException('Invalid .ci/mod.json releaseBranch')
+    def output = providers.exec {
+        workingDir projectDir
+        commandLine 'node', '.ci/scripts/build-profile.mjs', 'resolve', projectDir.absolutePath
+    }.standardOutput.asText.get()
+    def resolved = new JsonSlurper().parseText(output)
+    if (!(resolved.profile instanceof Map) || !(resolved.identity instanceof Map)) {
+        throw new GradleException('Profile resolver returned invalid JSON')
     }
-    if (name != table.default && releaseBranch == 'main' && !selected.repositoryLatest) {
-        throw new GradleException('A non-default profile must declare its own releaseBranch')
-    }
-    if (minecraft_version.toString() != selected.minecraft) {
-        throw new GradleException("minecraft_version ${minecraft_version} does not match build profile ${name}")
-    }
-    if (!pluginManager.hasPlugin(selected.gradlePlugin)) {
-        throw new GradleException("Build profile ${name} requires the ${selected.gradlePlugin} plugin")
+    def selected = resolved.profile
+    if (!pluginManager.hasPlugin(selected.gradlePlugin.toString())) {
+        throw new GradleException("Build profile ${selected.name} requires the ${selected.gradlePlugin} plugin")
     }
     def toolchain = java.toolchain.languageVersion.getOrNull()
     if (toolchain == null || toolchain.asInt() != selected.java) {
-        throw new GradleException("Build profile ${name} requires a Java ${selected.java} toolchain, found ${toolchain}")
+        throw new GradleException("Build profile ${selected.name} requires a Java ${selected.java} toolchain, found ${toolchain}")
     }
-    ext.buildProfile = selected + [name: name, releaseBranch: releaseBranch]
-    ext.releaseIdentity = { String modId, String version ->
-        buildProfile.identity == 'legacy'
-                ? [tag: "v${version}".toString(), jarFilename: "${modId}-${buildProfile.minecraft}-${version}.jar".toString()]
-                : [tag: "${buildProfile.loader}-${buildProfile.minecraft}-v${version}".toString(),
-                   jarFilename: "${modId}-${buildProfile.minecraft}-${buildProfile.loader}-${version}.jar".toString()]
-    }
+    ext.buildProfile = selected
+    ext.releaseIdentity = resolved.identity
 }

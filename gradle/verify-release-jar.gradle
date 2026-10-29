@@ -6,7 +6,7 @@ import java.util.zip.ZipOutputStream
 import java.util.regex.Pattern
 
 apply from: 'gradle/test-world.gradle'
-apply from: 'gradle/build-profile.gradle'
+apply from: 'gradle/release-manifest.gradle'
 
 // Publish retries compare exact bytes. On Forge, ForgeGradle reobfJar consumes this archive in place
 // (a RenameJarInPlace task, not an AbstractArchiveTask); on NeoForge the jar task is final.
@@ -273,18 +273,8 @@ tasks.register('verifyReleaseJar') {
         ReleaseJarGuard.verifyGameTestTask(config.gametests, tasks.findByName('runGameTestServer') != null)
         def jarSpec = config.containsKey('jar') ? config.jar : [:]
         ReleaseJarGuard.validateJarSpec(jarSpec)
-        def releaseVersion = mod_version.toString()
-        if (!(releaseVersion ==~ /(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:-[0-9A-Za-z.-]+)?/)) {
-            throw new GradleException('Expected semantic mod_version')
-        }
-        def identity = releaseIdentity(config.modId, releaseVersion)
-        def expected = identity.jarFilename
-        def manifest = [modId: config.modId, name: mod_name.toString(), version: releaseVersion,
-                        tag: identity.tag, side: config.packSide, jarFilename: expected,
-                        prerelease: releaseVersion.startsWith('0.') || releaseVersion.contains('-'),
-                        profile: buildProfile.name, loader: buildProfile.loader, minecraft: buildProfile.minecraft,
-                        identity: buildProfile.identity, releaseBranch: buildProfile.releaseBranch,
-                        sourceSha: sourceCommit(), provenance: portProvenance()]
+        def manifest = releaseManifest(config)
+        def expected = manifest.jarFilename
         Set<String> classes = [] as Set
         sourceSets.main.output.classesDirs.each { root ->
             fileTree(root).matching { include '**/*.class' }.visit { detail ->
@@ -310,27 +300,4 @@ tasks.register('verifyReleaseJar') {
         manifestFile.setText(JsonOutput.prettyPrint(JsonOutput.toJson(manifest)) + '\n', 'UTF-8')
         logger.lifecycle("Verified release jar: ${jar.name} (${classes.size()} compiled main classes, profile ${buildProfile.name})")
     }
-}
-
-// The exact commit the jar was built from: CI's GITHUB_SHA, else the local checkout's HEAD.
-ext.sourceCommit = { ->
-    def sha = System.getenv('GITHUB_SHA')
-    if (!sha) {
-        try {
-            def process = ['git', 'rev-parse', 'HEAD'].execute(null, projectDir)
-            sha = process.waitFor() == 0 ? process.text.trim() : null
-        } catch (IOException ignored) { sha = null }
-    }
-    return sha ==~ /[0-9a-f]{40}/ ? sha : null
-}
-
-// Optional .ci/port-provenance.json (fork/branch ancestry and dependency evidence) travels with the manifest.
-ext.portProvenance = { ->
-    def provenance = file('.ci/port-provenance.json')
-    if (!provenance.isFile()) return null
-    def parsed = new JsonSlurper().parse(provenance)
-    if (!(parsed instanceof Map) || !parsed.branchStart || !parsed.baseline) {
-        throw new GradleException('.ci/port-provenance.json needs branchStart and baseline')
-    }
-    return parsed
 }
