@@ -1,5 +1,34 @@
 # Decisions
 
+## 2026-10-29 - NeoForge 1.21.1 line on its own branch
+
+The port lives on the long-lived `neoforge-1.21.1` branch, started from Forge `main` at
+`233d9fd` (pack baseline `v0.1.0` = `881932c`); `main` keeps Forge 1.20.1. Fixes are cherry-picked
+deliberately. Releases are `neoforge-1.21.1-v<version>` with `dank_recipe_transfer-1.21.1-neoforge-<version>.jar`,
+starting at 0.2.0, and never become GitHub's "latest" while Forge is the maintenance default.
+Rejected: one cross-version source tree (the Minecraft API gap is too wide).
+
+- **Recipes travel as holders.** 1.21 recipes have no id of their own; viewers (JEI 19, EMI 1.21) hand
+  over `RecipeHolder<CraftingRecipe>`, and the id sent to the server, the server lookup, the executor
+  and Polymorph's selection all keep that holder, so the requested recipe stays the one that wins.
+- **Item identity is vanilla's stacking identity.** `ItemKey` keys on a count-1 copy compared with
+  `ItemStack.isSameItemSameComponents` and hashed with `hashItemAndComponents`: every component,
+  removed defaults and a max-stack-size component included. Rejected: keying on `CUSTOM_DATA` only,
+  which would merge differently named or enchanted stacks.
+- **Protocol 2, typed optional payloads.** Four `CustomPacketPayload`s (subscribe/request serverbound,
+  snapshot/result clientbound), registered `optional()` on the main thread. NeoForge throws when a
+  payload is sent to a peer that never negotiated it, so every send checks `hasChannel` first: a
+  vanilla client gets nothing and keeps native transfer. Snapshot bounds (2,048 entries, 900,000
+  bytes) are measured from the start of the snapshot body. Forge and NeoForge peers never interoperate.
+- **Dank 20 auto-sort.** Dank's inventory now re-sorts itself after every change when its auto-sort
+  setting is on, so slots move during a transfer. Extraction follows the key to whichever slot holds it,
+  and rollback restores a whole-store checkpoint (items and ghost locks) with list replacement instead
+  of per-slot writes, which would each trigger another sort. `CarriedDank#restore(slot, stack)` became
+  `checkpoint()`; this is the only structural change to the Dank boundary.
+- **Viewer hooks kept.** The JEI and EMI mixins keep their targets; their descriptors were re-checked
+  against the pinned jars (README "Source pins"). Keeping narrow internal hooks preserves native
+  transfer when no Dank item is needed.
+
 ## 2026-10-25 - Shared hosted CI and deliberate releases
 
 Adopt the workspace template as byte-identical standalone files. Pushes verify without publishing;

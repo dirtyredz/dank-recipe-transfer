@@ -1,6 +1,6 @@
 # Dank Recipe Transfer
 
-Forge 1.20.1 companion mod: the JEI and EMI recipe-transfer button ("+") fills the vanilla
+NeoForge 1.21.1 companion mod (branch `neoforge-1.21.1`; the Forge 1.20.1 line stays on `main`): the JEI and EMI recipe-transfer button ("+") fills the vanilla
 crafting table and the player's 2x2 inventory grid from what is already in the grid, then loose
 inventory, then any **Dank Storage** you carry. Transfers run on the server, are validated, and are
 all-or-nothing.
@@ -11,16 +11,18 @@ Generic: not tied to any modpack.
 
 | Component | Version | Required |
 |---|---|---|
-| Minecraft | 1.20.1 | yes |
-| Forge | 47.x (built and tested on 47.4.10) | yes |
-| Dank Storage | `dankstorage-forge-1.20.1-16` (CurseForge 335673, file 7300650) | yes, both sides |
-| JEI | 15.62.0.219 | optional, client |
-| EMI | 1.1.24+1.20.1 | optional, client |
-| Polymorph | 0.49.11+1.20.1 (CurseForge 388800, file 8854504) | optional |
+| Minecraft | 1.21.1 | yes |
+| NeoForge | 21.1.265 or a later 21.1 build | yes |
+| Dank Storage | build `20` for 1.21.1 (CurseForge 335673, file 7539725) | yes, both sides |
+| JEI | 19.70.0.464 | optional, client |
+| EMI | 1.1.24+1.21.1 | optional, client |
+| Polymorph | 1.2.0+1.21.1 (CurseForge 388800, file 8849478) | optional |
 
 **Install on both the server and every client.** If either side lacks the mod, the viewers fall
-back to their normal behaviour (the channel accepts a missing peer). Sophisticated Backpacks is not
-needed and not used.
+back to their normal behaviour: the payloads are registered optional, and nothing is sent to a
+peer that did not negotiate them. The wire protocol is version `2` and does not interoperate with
+the Forge 1.20.1 build (`1`); worlds carry no Dank Recipe Transfer data, so nothing converts.
+Sophisticated Backpacks is not needed and not used.
 
 ## Behaviour
 
@@ -46,6 +48,9 @@ needed and not used.
   after the grid opens). Until then the viewer behaves natively and Dank-only recipes show as
   missing. EMI's button refreshes on its own when the snapshot arrives. A menu the server cannot
   serve gets an explicit "unsupported" reply, and the viewer stays native.
+- Item identity is the item plus its complete data components (names, enchantments, custom data,
+  removed defaults, a max-stack-size component), never the count, exactly like vanilla stacking.
+  Different components are different ingredients and different snapshot lines.
 - Diagnostics: subscription accept/refuse (server) and snapshot receipt (client) are logged at
   DEBUG, so they appear in `logs/debug.log`.
 
@@ -72,56 +77,67 @@ See [STRUCTURE.md](STRUCTURE.md) for the code map and [docs/DECISIONS.md](docs/D
 
 ## Build and test
 
-Requires only a JDK to run Gradle; the Java 17 toolchain is provisioned automatically.
+Requires only a JDK to run Gradle; the Java 21 toolchain is provisioned automatically.
+The build uses ModDevGradle 2.0.148 (official mappings).
 
 ```
-./gradlew test build          # unit tests + reobfuscated release jar
-./gradlew runGameTestServer   # headless Forge server GameTests against real Dank Storage
+./gradlew test build verifyReleaseJar   # unit tests + release jar + jar guard
+./gradlew runGameTestServer             # headless NeoForge server GameTests against real Dank Storage
 git diff --check
 ```
 
-- Release jar: `build/libs/dank_recipe_transfer-1.20.1-<version>.jar` (reobfuscated). GameTests and
+- Release jar: `build/libs/dank_recipe_transfer-1.21.1-neoforge-<version>.jar` (no reobfuscation on NeoForge). GameTests and
   unit tests live in their own source sets and are not in it; no dependency is bundled.
 - `-PwithViewers=jei,emi` (either or both) puts the viewers on the dev runtime classpath, for
-  running the GameTest server with them installed.
+  running the GameTest server with them installed; `-PwithPolymorph` adds Polymorph.
 - Never run `runClient` from automation; client behaviour is verified by a person in game.
 
 ## Release
 
 The version lives only in `gradle.properties`. Prepare non-empty `docs/releases/<version>.md`
-for a release, then obtain the owner's go-ahead to push and land on main. Push CI runs
+for a release, then obtain the owner's go-ahead to push the `neoforge-1.21.1` branch (the
+release branch declared in `.ci/mod.json`; never merged into the Forge `main`). Push CI runs
 `./gradlew test build verifyReleaseJar`; it publishes nothing.
 After green main CI and owner authorization, the agent dispatches
-`gh workflow run release.yml --ref main`. The workflow verifies again, requires successful Forge GameTests, builds
-the final jar, creates its version tag, uploads a draft, reads every asset back and compares
+`gh workflow run release.yml --ref neoforge-1.21.1`; any other branch is refused. The workflow verifies
+again, requires successful NeoForge GameTests, builds the final jar, creates its `neoforge-1.21.1-v<version>` tag, uploads a draft, reads every asset back and compares
 SHA-256 before publishing the jar, its `.sha256` and `dank_recipe_transfer.pw.toml`.
 The pack session consumes the published `.pw.toml`; the owner never publishes by hand.
 Versions starting with `0.` or containing `-` are prereleases. Existing releases/tags are
-refused, published bytes are never replaced, and stable latest never moves backward.
+refused, published bytes are never replaced, and a NeoForge release never becomes GitHub's
+repository-wide "latest" while Forge is the maintenance default.
 A failed draft requires deliberate recovery before retrying.
 
 Local fast gate: `./gradlew --offline test build verifyReleaseJar` with cached dependencies.
 Shared files are checked from the workspace with `tools/sync-mod-files.ps1 -Check -Mod <this-worktree>`.
 
-CI sets `datagen: false` (no generator) and `gametests: true` (the real Forge suite against Dank Storage).
+CI sets `profile: neoforge-1.21.1`, `releaseBranch: neoforge-1.21.1`, `datagen: false` and `gametests: true`
+(the real NeoForge suite against Dank Storage).
 The shared `verifyReleaseJar` guard checks metadata and excludes non-main classes/test resources.
-It also enforces the mixin config and its optional-viewer gate, manifest activation and MIT license
-declared in `.ci/mod.json` (`requiredEntries`, `manifestContains`, `entryContains`). These automated
+It requires `neoforge.mods.toml` (refusing Forge's `mods.toml`), its `[[mixins]]` declaration, the mixin
+config with its optional-viewer gate and `JAVA_21` level, no manifest `MixinConfigs`, and the MIT license,
+as declared in `.ci/mod.json`. `.ci/port-provenance.json` (branch start, pack baseline, pinned dependency
+hashes) travels into `build/ci/release.json`. These automated
 checks are authoritative in both the local fast gate and hosted CI.
 
 ## Source pins
 
-The integration points were read at these exact sources (recorded 2026-10-20):
+The integration points were read with `javap` from these exact pinned jars (2026-10-29; SHA-256 in
+`.ci/port-provenance.json`):
 
-- Dank Storage `Tfarcenim/Dank-Storage` branch `1.20.1-multiloader`, `gradle.properties version=16`
-  (`DankItemCapability`, `DankInventoryForge`, `CDankSavedData`, `PortableDankProvider`).
-- JEI tag `v15.62.0` (`RecipeTransferManager`, `BasicRecipeTransferHandler`,
-  `PlayerRecipeTransferHandler`, `IRecipeTransferContext`); signatures re-checked with `javap`
-  against `jei-1.20.1-forge-15.62.0.219.jar`.
-- EMI tag `1.1.24+1.20.1` (`EmiRecipeFiller#getAllHandlers`, `RecipeFillButtonWidget`,
-  `CraftingRecipeHandler`, `InventoryRecipeHandler`); re-checked against `emi-1.1.24+1.20.1+forge.jar`.
-- Polymorph `0.49.11+1.20.1` jar: `PlayerRecipeData#selectRecipe` clears its cache, stores the
-  recipe and syncs the player.
+- Dank Storage 20 (`curse.maven:dank-storage-335673:7539725`): `DankItem` (frequency is the
+  `dankstorage:frequency` component, `stats` tier), `DankSavedData#get` (non-creating;
+  `DimensionDataStorage#get` under `dankstorage/<frequency>`), `DankInventoryForge` (NeoForge
+  `IItemHandlerModifiable`; extraction capped at the stack's max size), `DankInventory` (ghost
+  stacks, frequency lock, and an auto-sort that re-sorts on every change). The Forge build's
+  `CDankItem`/`CDankSavedData`/`DankInterface` no longer exist; the adapter was rewritten, not renamed.
+- JEI 19.70.0.464: `RecipeTransferManager#getRecipeTransferHandler(C, IRecipeCategory)`,
+  `BasicRecipeTransferHandler`, `PlayerRecipeTransferHandler` (now typed on
+  `RecipeHolder<CraftingRecipe>`), `IRecipeTransferHandlerHelper#getGuiSlotIndexToIngredientMap(RecipeHolder)`.
+- EMI 1.1.24+1.21.1: `EmiRecipeFiller#getAllHandlers`, `RecipeFillButtonWidget#canFill/tooltip`,
+  `RecipeButtonWidget#recipe`, `EmiRecipe#getBackingRecipe` (a `RecipeHolder`).
+- Polymorph 1.2.0+1.21.1: `PolymorphApi#getPlayerRecipeData`, `IRecipeData#selectRecipe(RecipeHolder)`
+  (stores the selection, clears its cache and syncs the player).
 
 ## Credits
 
