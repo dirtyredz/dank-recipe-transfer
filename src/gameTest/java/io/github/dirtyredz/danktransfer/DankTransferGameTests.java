@@ -117,10 +117,14 @@ public final class DankTransferGameTests {
 
     @GameTest(template = TEMPLATE)
     public static void ghostLockSurvivesDepletion(GameTestHelper helper) {
+        // Dank 20 stores start with auto-sort on; this is the auto-sort-off rule (see the next test).
         ServerLevel level = helper.getLevel();
         ServerPlayer player = player(helper, "ghost");
         ItemStack carrier = newDank(level, 1);
         DankInventoryForge dank = storage(level, carrier);
+        if (dank.autoSort()) {
+            dank.toggleAutoSort();
+        }
         dank.setGhostItem(2, new ItemStack(Items.OAK_PLANKS));
         dank.setStackInSlot(2, new ItemStack(Items.OAK_PLANKS, 2));
         player.getInventory().setItem(0, carrier);
@@ -131,6 +135,41 @@ public final class DankTransferGameTests {
         check(dank.getGhostItem(2).is(Items.OAK_PLANKS), "ghost filter retained after depletion");
         ItemStack refused = dank.insertItem(2, new ItemStack(Items.STONE), true);
         check(refused.getCount() == 1, "ghost filter still refuses other items");
+        helper.succeed();
+    }
+
+    /**
+     * With auto-sort on (Dank 20's default), Dank's own sort keeps ghost locks only on slots that still
+     * hold items, so emptying a locked slot by hand also drops its lock. A transfer must leave exactly
+     * what Dank's native extraction of the same items leaves: same contents, same locks.
+     */
+    @GameTest(template = TEMPLATE)
+    public static void autoSortGhostsMatchNativeExtraction(GameTestHelper helper) {
+        ServerLevel level = helper.getLevel();
+        ServerPlayer player = player(helper, "ghostsort");
+        ItemStack carrier = newDank(level, 1);
+        DankInventoryForge dank = storage(level, carrier);
+        DankInventoryForge twin = storage(level, newDank(level, 1));
+        for (DankInventoryForge store : List.of(dank, twin)) {
+            check(store.autoSort(), "Dank 20 stores start auto-sorted");
+            store.setGhostItem(0, new ItemStack(Items.OAK_PLANKS));
+            store.setGhostItem(1, new ItemStack(Items.COAL));
+            store.setStackInSlot(0, new ItemStack(Items.OAK_PLANKS, 2));
+            store.setStackInSlot(1, new ItemStack(Items.COAL, 4));
+        }
+        player.getInventory().setItem(0, carrier);
+        openTable(helper, player);
+
+        check(run(player, recipe(level, "minecraft:stick"), 1) == TransferOutcome.SUCCESS, "transfer");
+        for (int i = 0; i < twin.getSlots(); i++) {
+            if (twin.getStackInSlot(i).is(Items.OAK_PLANKS)) {
+                twin.extractItem(i, 2, false);
+                break;
+            }
+        }
+        check(state(player, dank).equals(state(player, twin)),
+                "transfer leaves the store exactly as native extraction does:\ntransfer " + state(player, dank)
+                        + "\nnative   " + state(player, twin));
         helper.succeed();
     }
 
@@ -220,7 +259,6 @@ public final class DankTransferGameTests {
         DankItem.setUseType(carrier, UseType.construction);
         DankInventoryForge dank = storage(level, carrier);
         dank.setStackInSlot(0, new ItemStack(Items.OAK_PLANKS, 5));
-        dank.toggleFrequencyLock();
         player.getInventory().setItem(0, carrier);
         ItemStack before = carrier.copy();
         boolean lockBefore = dank.frequencyLocked();
@@ -229,7 +267,7 @@ public final class DankTransferGameTests {
         check(run(player, recipe(level, "minecraft:stick"), 1) == TransferOutcome.SUCCESS, "transfer");
         check(ItemStack.isSameItemSameComponents(before, player.getInventory().getItem(0)),
                 "carrier components unchanged: " + player.getInventory().getItem(0).getComponentsPatch());
-        check(lockBefore && dank.frequencyLocked(), "frequency lock unchanged");
+        check(dank.frequencyLocked() == lockBefore, "frequency lock unchanged");
         check(GameTestFixtures.savedData(level, carrier).getStats() == GameTestFixtures.dankItem(1).stats, "tier unchanged");
         helper.succeed();
     }
@@ -429,13 +467,16 @@ public final class DankTransferGameTests {
         ServerPlayer player = player(helper, "autosort");
         ItemStack carrier = newDank(level, 1);
         DankInventoryForge dank = storage(level, carrier);
+        // Fill unsorted first (each write would re-sort and shift the slots being filled), then sort.
+        if (dank.autoSort()) {
+            dank.toggleAutoSort();
+        }
         dank.setStackInSlot(4, new ItemStack(Items.STICK, 3));
         dank.setStackInSlot(2, new ItemStack(Items.COAL, 9));
         dank.setStackInSlot(0, new ItemStack(Items.STICK, 5));
-        dank.setGhostItem(6, new ItemStack(Items.COAL));
-        if (!dank.autoSort()) {
-            dank.toggleAutoSort();
-        }
+        dank.setGhostItem(2, new ItemStack(Items.COAL));
+        dank.toggleAutoSort();
+        check(dank.autoSort(), "auto-sort back on");
         player.getInventory().setItem(0, carrier);
         openTable(helper, player);
         String before = state(player, dank);

@@ -41,7 +41,10 @@ Sophisticated Backpacks is not needed and not used.
   Nothing is ever put back into a Dank.
 - If a plan needs no Dank items, the viewer's own native transfer runs instead (JEI's packet, EMI's
   fill), so ordinary transfers behave exactly as before.
-- Dank rules are Dank's own: ghost (locked) slots keep their filter after being emptied; pickup and
+- Dank rules are Dank's own. Dank 20 stores start with auto-sort on: the store re-sorts after every
+  change, and its sort keeps a ghost (locked) filter only on slots that still hold items, so emptying a
+  locked slot (by hand or by a transfer) drops that lock exactly as Dank does natively. With auto-sort
+  off, ghost slots keep their filter after being emptied; pickup and
   construction modes do not block extraction; a lower-tier Dank linked to higher-tier storage is
   ignored, like Dank refuses to open it. Discovery never creates, upgrades or relinks storage.
 - The button reflects Dank contents only after the server sends the first snapshot (a few ticks

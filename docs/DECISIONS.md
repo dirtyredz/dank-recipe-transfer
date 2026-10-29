@@ -25,6 +25,10 @@ Rejected: one cross-version source tree (the Minecraft API gap is too wide).
   and rollback restores a whole-store checkpoint (items and ghost locks) with list replacement instead
   of per-slot writes, which would each trigger another sort. `CarriedDank#restore(slot, stack)` became
   `checkpoint()`; this is the only structural change to the Dank boundary.
+  New Dank 20 stores default to auto-sort on and frequency-locked. Dank's sort keeps ghost locks only
+  on non-empty slots, so a depleted locked slot loses its lock under auto-sort; the transfer matches
+  native Dank extraction (GameTest `autoSortGhostsMatchNativeExtraction`) rather than bypassing Dank to
+  preserve the 1.20.1 behaviour. Rejected: writing Dank's lists directly during extraction.
 - **Viewer hooks kept.** The JEI and EMI mixins keep their targets; their descriptors were re-checked
   against the pinned jars (README "Source pins"). Keeping narrow internal hooks preserves native
   transfer when no Dank item is needed.
