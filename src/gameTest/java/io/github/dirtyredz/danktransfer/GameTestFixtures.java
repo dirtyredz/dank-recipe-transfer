@@ -2,6 +2,7 @@ package io.github.dirtyredz.danktransfer;
 
 import com.mojang.authlib.GameProfile;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.gametest.framework.GameTestAssertException;
 import net.minecraft.gametest.framework.GameTestHelper;
 import net.minecraft.resources.ResourceLocation;
@@ -12,16 +13,14 @@ import net.minecraft.world.inventory.CraftingMenu;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.CraftingRecipe;
+import net.minecraft.world.item.crafting.RecipeHolder;
 import net.minecraft.world.level.block.Blocks;
-import net.minecraftforge.common.util.FakePlayerFactory;
-import net.minecraftforge.registries.ForgeRegistries;
+import net.neoforged.neoforge.common.util.FakePlayerFactory;
 import tfar.dankstorage.DankStorage;
-import tfar.dankstorage.inventory.DankInterface;
-import tfar.dankstorage.item.CDankItem;
-import tfar.dankstorage.utils.CommonUtils;
+import tfar.dankstorage.item.DankItem;
 import tfar.dankstorage.utils.DankStats;
-import tfar.dankstorage.world.CDankSavedData;
 import tfar.dankstorage.world.DankInventoryForge;
+import tfar.dankstorage.world.DankSavedData;
 
 import java.nio.charset.StandardCharsets;
 import java.util.UUID;
@@ -67,50 +66,56 @@ final class GameTestFixtures {
         return menu;
     }
 
-    static CDankItem dankItem(int tier) {
-        Item item = ForgeRegistries.ITEMS.getValue(ResourceLocation.fromNamespaceAndPath("dankstorage", "dank_" + tier));
-        check(item instanceof CDankItem, "dank_" + tier + " is not registered");
-        return (CDankItem) item;
+    static DankItem dankItem(int tier) {
+        Item item = BuiltInRegistries.ITEM.get(ResourceLocation.fromNamespaceAndPath("dankstorage", "dank_" + tier));
+        check(item instanceof DankItem, "dank_" + tier + " is not registered");
+        return (DankItem) item;
     }
 
-    /** Creates fresh storage exactly as Dank does on first open and returns a carrier linked to it. */
+    /**
+     * Creates fresh storage exactly as Dank does on first open (DankItem's menu provider: the first free
+     * id, {@code getOrCreate}, then the carrier's stats) and returns a carrier linked to it.
+     */
     static ItemStack newDank(ServerLevel level, int tier) {
-        CDankItem item = dankItem(tier);
-        int frequency = DankStorage.maxId.getMaxId();
-        DankStorage.maxId.increment();
-        CDankSavedData data = DankStorage.getData(frequency, level.getServer());
-        data.setStats(item.stats, frequency);
-        data.createFreshInventory(item.stats, frequency);
+        DankItem item = dankItem(tier);
+        int frequency = DankStorage.firstFreeId(level.getServer());
+        check(frequency >= 0, "no free Dank frequency");
+        DankSavedData data = DankSavedData.getOrCreate(frequency, level.getServer());
+        data.setStats(item.stats);
+        data.getOrCreateInventory();
         return carrier(tier, frequency);
     }
 
     /** A carrier of {@code tier} linked to {@code frequency} (no storage is created). */
     static ItemStack carrier(int tier, int frequency) {
         ItemStack stack = new ItemStack(dankItem(tier));
-        CommonUtils.getOrCreateSettings(stack).putInt(CommonUtils.FREQ, frequency);
+        DankItem.setFrequency(stack, frequency);
         return stack;
     }
 
     static int frequency(ItemStack carrier) {
-        return CommonUtils.getFrequency(carrier);
+        return DankItem.getFrequency(carrier);
     }
 
     static DankInventoryForge storage(ServerLevel level, ItemStack carrier) {
-        DankInterface inventory = DankStorage.getData(frequency(carrier), level.getServer()).createInventory(frequency(carrier));
-        check(inventory instanceof DankInventoryForge, "Dank storage is not the Forge handler");
-        check(inventory.getDankStats() != DankStats.zero, "Dank storage was not initialised");
-        return (DankInventoryForge) inventory;
+        DankSavedData data = savedData(level, carrier);
+        check(data != null, "Dank storage does not exist");
+        check(data.getStats() != DankStats.zero, "Dank storage was not initialised");
+        check(data.getOrCreateInventory() instanceof DankInventoryForge, "Dank storage is not the NeoForge handler");
+        return (DankInventoryForge) data.getOrCreateInventory();
     }
 
-    static CDankSavedData savedData(ServerLevel level, ItemStack carrier) {
-        return DankStorage.getData(frequency(carrier), level.getServer());
+    static DankSavedData savedData(ServerLevel level, ItemStack carrier) {
+        return DankSavedData.get(frequency(carrier), level.getServer());
     }
 
-    static CraftingRecipe recipe(ServerLevel level, String id) {
-        return level.getRecipeManager().byKey(ResourceLocation.parse(id))
-                .filter(r -> r instanceof CraftingRecipe)
-                .map(r -> (CraftingRecipe) r)
+    static RecipeHolder<CraftingRecipe> recipe(ServerLevel level, String id) {
+        RecipeHolder<?> holder = level.getRecipeManager().byKey(ResourceLocation.parse(id))
                 .orElseThrow(() -> new GameTestAssertException("missing recipe " + id));
+        check(holder.value() instanceof CraftingRecipe, id + " is not a crafting recipe");
+        @SuppressWarnings("unchecked")
+        RecipeHolder<CraftingRecipe> crafting = (RecipeHolder<CraftingRecipe>) holder;
+        return crafting;
     }
 
     static int count(DankInventoryForge storage, Item item) {
@@ -134,7 +139,7 @@ final class GameTestFixtures {
         return total;
     }
 
-    /** Every item the player could have touched, rendered for before/after equality. */
+    /** Every item the player could have touched, rendered for before/after equality (components included). */
     static String state(ServerPlayer player, DankInventoryForge... storages) {
         StringBuilder out = new StringBuilder();
         out.append("carried=").append(describe(player.containerMenu.getCarried())).append('\n');
@@ -142,8 +147,9 @@ final class GameTestFixtures {
             out.append("slot").append(i).append('=').append(describe(player.containerMenu.getSlot(i).getItem())).append(';');
         }
         out.append("\noffhand=").append(describe(player.getInventory().offhand.get(0))).append('\n');
-        for (DankInventoryForge storage : storages) {
-            out.append("dank").append(storage.frequency()).append(':');
+        for (int s = 0; s < storages.length; s++) {
+            DankInventoryForge storage = storages[s];
+            out.append("dank").append(s).append(':');
             for (int i = 0; i < storage.getSlots(); i++) {
                 out.append(describe(storage.getStackInSlot(i))).append('|').append(describe(storage.getGhostItem(i))).append(';');
             }
@@ -152,8 +158,8 @@ final class GameTestFixtures {
         return out.toString();
     }
 
-    private static String describe(ItemStack stack) {
-        return stack.isEmpty() ? "-" : stack.getCount() + "x" + ForgeRegistries.ITEMS.getKey(stack.getItem())
-                + (stack.hasTag() ? stack.getTag().toString() : "");
+    static String describe(ItemStack stack) {
+        return stack.isEmpty() ? "-" : stack.getCount() + "x" + BuiltInRegistries.ITEM.getKey(stack.getItem())
+                + (stack.getComponentsPatch().isEmpty() ? "" : stack.getComponentsPatch().toString());
     }
 }

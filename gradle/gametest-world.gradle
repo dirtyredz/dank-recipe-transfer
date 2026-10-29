@@ -1,10 +1,13 @@
 apply from: 'gradle/test-world.gradle'
+apply from: 'gradle/build-profile.gradle'
 
-// Every GameTest JVM (runGameTestServer and the qualification phases) is a Forge dedicated server, and a
+// Every GameTest JVM (runGameTestServer and the qualification phases) is a loader dedicated server, and a
 // dedicated server creates its world from server.properties. Without one it generates normal terrain, so the
 // plots at y = -60 sit in caves: gravel falls into them, water and lava flow in, and cave mobs walk through.
 // A superflat world with no natural spawning or structures gives each plot only what its test builds.
 // Only a new world reads these settings; an existing world (a save-upgrade fixture) keeps its own generator.
+// The loader/mod data pack ids come from the build profile: Forge names each mod (mod:forge,mod:<id>);
+// NeoForge serves ordinary mods through one combined mod_data pack.
 ext.gameTestWorld = { File dir, String modId = mod_id.toString() ->
     dir.mkdirs()
     def pack = file(testWorldSpec.sourcePath)
@@ -19,14 +22,24 @@ ext.gameTestWorld = { File dir, String modId = mod_id.toString() ->
             'spawn-monsters=false',
             'spawn-animals=false',
             'spawn-npcs=false',
-            "initial-enabled-packs=vanilla,mod:forge,mod:${modId},file/${testWorldSpec.packName}",
+            "initial-enabled-packs=${enabledPacks(modId)}",
     ].join('\n') + '\n'
+}
+
+ext.enabledPacks = { String modId ->
+    (['vanilla'] + buildProfile.modDataPacks.collect { it.replace('{modId}', modId) } + ["file/${testWorldSpec.packName}"]).join(',')
+}
+
+// ForgeGradle and ModDevGradle expose the GameTest run directory through different models.
+ext.gameTestRunDirectory = { ->
+    buildProfile.loader == 'forge' ? file(minecraft.runs.gameTestServer.workingDirectory)
+            : neoForge.runs.gameTestServer.gameDirectory.get().asFile
 }
 
 tasks.register('testGameTestWorld') {
     group = 'verification'
     doLast {
-        // A different id catches accidental Roundwood coupling without booting Forge.
+        // A different id catches accidental Roundwood coupling without booting the loader.
         def dir = layout.buildDirectory.dir('ci/world-staging-test').get().asFile
         project.delete(dir)
         def world = new File(dir, testWorldSpec.worldPath)
@@ -36,7 +49,9 @@ tasks.register('testGameTestWorld') {
         gameTestWorld(dir, 'fixture_mod')
         def properties = new Properties()
         new File(dir, 'server.properties').withInputStream { properties.load(it) }
-        assert properties.getProperty('initial-enabled-packs') == "vanilla,mod:forge,mod:fixture_mod,file/${testWorldSpec.packName}"
+        def expectedPacks = buildProfile.loader == 'forge' ? "vanilla,mod:forge,mod:fixture_mod,file/${testWorldSpec.packName}"
+                : "vanilla,mod_data,file/${testWorldSpec.packName}"
+        assert properties.getProperty('initial-enabled-packs') == expectedPacks.toString()
         assert properties.getProperty('level-type') == 'minecraft:flat'
         assert existingSave.text == 'existing save must survive staging'
         fileTree(file(testWorldSpec.sourcePath)).visit { detail ->
@@ -45,10 +60,10 @@ tasks.register('testGameTestWorld') {
                 assert staged.bytes == detail.file.bytes
             }
         }
-        logger.lifecycle('GameTest world staging: alternate mod id, pack bytes, existing save PASS')
+        logger.lifecycle("GameTest world staging (${buildProfile.name}): alternate mod id, pack bytes, existing save PASS")
     }
 }
 tasks.matching { it.name == 'runGameTestServer' }.configureEach { task ->
     // The run configuration owns the working directory; the task only adopts it when it executes.
-    task.doFirst { gameTestWorld(file(minecraft.runs.gameTestServer.workingDirectory)) }
+    task.doFirst { gameTestWorld(gameTestRunDirectory()) }
 }

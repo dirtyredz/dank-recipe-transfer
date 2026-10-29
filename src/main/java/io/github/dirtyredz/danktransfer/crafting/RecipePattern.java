@@ -4,7 +4,7 @@ import io.github.dirtyredz.danktransfer.crafting.PlanInput.PatternSlot;
 import net.minecraft.core.NonNullList;
 import net.minecraft.world.item.crafting.CraftingRecipe;
 import net.minecraft.world.item.crafting.Ingredient;
-import net.minecraftforge.common.crafting.IShapedRecipe;
+import net.minecraft.world.item.crafting.ShapedRecipe;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -28,9 +28,10 @@ public final class RecipePattern {
         }
         NonNullList<Ingredient> ingredients = recipe.getIngredients();
         List<PatternSlot<ItemKey>> pattern = new ArrayList<>();
-        if (recipe instanceof IShapedRecipe<?> shaped) {
-            int width = shaped.getRecipeWidth();
-            int height = shaped.getRecipeHeight();
+        // 1.21.1 has no NeoForge shaped-recipe interface; shaped recipes (modded ones included) extend ShapedRecipe.
+        if (recipe instanceof ShapedRecipe shaped) {
+            int width = shaped.getWidth();
+            int height = shaped.getHeight();
             if (width <= 0 || height <= 0 || width > gridWidth || height > gridHeight
                     || ingredients.size() < width * height) {
                 return Optional.empty();

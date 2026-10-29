@@ -1,0 +1,36 @@
+{
+  "default": "forge-1.20.1",
+  "profiles": {
+    "forge-1.20.1": {
+      "loader": "forge",
+      "minecraft": "1.20.1",
+      "java": 17,
+      "gradlePlugin": "net.minecraftforge.gradle",
+      "metadata": "META-INF/mods.toml",
+      "forbiddenMetadata": [],
+      "archiveTask": "reobfJar",
+      "modDataPacks": ["mod:forge", "mod:{modId}"],
+      "testDatapack": "tools/test-world/datapack",
+      "supersededDatapackFiles": [],
+      "identity": "legacy",
+      "repositoryLatest": true
+    },
+    "neoforge-1.21.1": {
+      "loader": "neoforge",
+      "minecraft": "1.21.1",
+      "java": 21,
+      "gradlePlugin": "net.neoforged.moddev",
+      "metadata": "META-INF/neoforge.mods.toml",
+      "forbiddenMetadata": ["META-INF/mods.toml"],
+      "archiveTask": "jar",
+      "modDataPacks": ["mod_data"],
+      "testDatapack": "tools/test-world/datapacks/1.21.1",
+      "supersededDatapackFiles": [
+        "data/minecraft/tags/functions/load.json",
+        "data/mod_test_world/functions/quiet.mcfunction"
+      ],
+      "identity": "qualified",
+      "repositoryLatest": false
+    }
+  }
+}

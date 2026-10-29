@@ -16,12 +16,15 @@ import io.github.dirtyredz.danktransfer.network.TransferMessages.Snapshot;
 import io.github.dirtyredz.danktransfer.network.TransferMessages.Subscribe;
 import io.github.dirtyredz.danktransfer.network.TransferMessages.TransferRequest;
 import io.github.dirtyredz.danktransfer.network.TransferMessages.TransferResult;
+import io.github.dirtyredz.danktransfer.network.payload.SubscribePayload;
+import io.github.dirtyredz.danktransfer.network.payload.TransferRequestPayload;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientPacketListener;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.world.inventory.AbstractContainerMenu;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.CraftingRecipe;
+import net.minecraft.world.item.crafting.RecipeHolder;
 import org.jetbrains.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -92,13 +95,26 @@ public final class ClientTransfer {
         }
     }
 
+    /**
+     * The crafting recipe behind a viewer's recipe object, which in 1.21.1 is a {@link RecipeHolder}
+     * for both JEI and EMI; null for anything else. The holder carries the recipe id the server needs.
+     */
+    @Nullable
+    @SuppressWarnings("unchecked")
+    public static RecipeHolder<CraftingRecipe> craftingHolder(@Nullable Object recipe) {
+        return recipe instanceof RecipeHolder<?> holder && holder.value() instanceof CraftingRecipe
+                ? (RecipeHolder<CraftingRecipe>) holder : null;
+    }
+
     /** Plans {@code batches} sets of {@code recipe} in {@code menu}. Never sends anything. */
     public static Preflight preflight(AbstractContainerMenu menu, @Nullable Object recipe, int batches) {
         Optional<CraftingMenuAccess> access = CraftingMenuAccess.of(menu);
         LocalPlayer player = Minecraft.getInstance().player;
-        if (access.isEmpty() || !(recipe instanceof CraftingRecipe crafting) || player == null || !serverSupports()) {
+        RecipeHolder<CraftingRecipe> holder = craftingHolder(recipe);
+        if (access.isEmpty() || holder == null || player == null || !serverSupports()) {
             return Preflight.UNSUPPORTED;
         }
+        CraftingRecipe crafting = holder.value();
         Optional<List<PatternSlot<ItemKey>>> pattern = RecipePattern.of(crafting, access.get().width(), access.get().height());
         if (pattern.isEmpty()) {
             return Preflight.UNSUPPORTED;
@@ -144,7 +160,8 @@ public final class ClientTransfer {
      *
      * @return false when nothing was sent (busy, unsupported or not synced)
      */
-    public static boolean send(AbstractContainerMenu menu, CraftingRecipe recipe, int batches, Consumer<TransferOutcome> onDone) {
+    public static boolean send(AbstractContainerMenu menu, RecipeHolder<CraftingRecipe> recipe, int batches,
+                               Consumer<TransferOutcome> onDone) {
         Snapshot<ItemStack> snapshot = CACHE.current(menu.containerId);
         if (snapshot == null || !snapshot.supported() || !serverSupports()) {
             return false;
@@ -162,15 +179,15 @@ public final class ClientTransfer {
             return false;
         }
         int wire = batches == TransferPlanner.MAX ? TransferMessages.MAX_BATCHES : batches;
-        TransferChannel.sendToServer(new TransferRequest(id.getAsInt(), menu.containerId, snapshot.session(),
-                snapshot.revision(), recipe.getId(), wire));
+        TransferChannel.sendToServer(Minecraft.getInstance().getConnection(), new TransferRequestPayload(
+                new TransferRequest(id.getAsInt(), menu.containerId, snapshot.session(), snapshot.revision(), recipe.id(), wire)));
         return true;
     }
 
-    /** Whether the connected server runs the companion. */
+    /** Whether the connected server runs the companion (negotiated both payload directions). */
     public static boolean serverSupports() {
         ClientPacketListener connection = Minecraft.getInstance().getConnection();
-        return connection != null && TransferChannel.isRemotePresent(connection.getConnection());
+        return TransferChannel.isRemotePresent(connection);
     }
 
     /** Changes whenever a snapshot arrives or is dropped; viewers use it to refresh cached state. */
@@ -212,14 +229,14 @@ public final class ClientTransfer {
         }
         PENDING.cancel(TransferOutcome.WRONG_MENU);
         if (subscribedMenu != DankSnapshotCache.NONE && serverSupports()) {
-            TransferChannel.sendToServer(new Subscribe(subscribedMenu, false));
+            TransferChannel.sendToServer(mc.getConnection(), new SubscribePayload(new Subscribe(subscribedMenu, false)));
         }
         subscribedMenu = desired;
         CACHE.watch(desired);
         if (desired != DankSnapshotCache.NONE) {
             LOGGER.debug("Subscribing to Dank snapshots for menu {} ({})", desired,
                     mc.player.containerMenu.getClass().getName());
-            TransferChannel.sendToServer(new Subscribe(desired, true));
+            TransferChannel.sendToServer(mc.getConnection(), new SubscribePayload(new Subscribe(desired, true)));
         }
     }
 

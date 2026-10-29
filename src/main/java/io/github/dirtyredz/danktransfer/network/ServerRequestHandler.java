@@ -9,7 +9,7 @@ import io.github.dirtyredz.danktransfer.sync.DankSnapshotService;
 import io.github.dirtyredz.danktransfer.sync.DankSnapshotService.Subscription;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.crafting.CraftingRecipe;
-import net.minecraft.world.item.crafting.Recipe;
+import net.minecraft.world.item.crafting.RecipeHolder;
 import net.minecraft.world.item.crafting.RecipeType;
 
 import java.util.Optional;
@@ -70,11 +70,12 @@ public final class ServerRequestHandler {
         if (subscription.get().revision() != request.revision()) {
             return TransferOutcome.STALE;
         }
-        Optional<? extends Recipe<?>> recipe = player.server.getRecipeManager().byKey(request.recipeId());
-        if (recipe.isEmpty() || !(recipe.get() instanceof CraftingRecipe crafting)
+        // The holder keeps the requested id through execution (Polymorph selection included).
+        Optional<RecipeHolder<?>> recipe = player.server.getRecipeManager().byKey(request.recipeId());
+        if (recipe.isEmpty() || !(recipe.get().value() instanceof CraftingRecipe crafting)
                 || crafting.getType() != RecipeType.CRAFTING) {
             return TransferOutcome.INVALID_RECIPE;
         }
-        return executor.execute(player, access.get(), crafting, request.batches());
+        return executor.execute(player, access.get(), new RecipeHolder<>(recipe.get().id(), crafting), request.batches());
     }
 }

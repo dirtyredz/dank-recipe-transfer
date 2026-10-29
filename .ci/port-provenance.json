@@ -1,0 +1,47 @@
+{
+  "repository": "dirtyredz/dank-recipe-transfer",
+  "line": "neoforge-1.21.1",
+  "branchStart": {
+    "commit": "233d9fdba3cfad061a057c4023bf3571413e789c",
+    "description": "Forge 1.20.1 main at the start of the NeoForge line (CI template sync after 0.1.0; no gameplay changes since 0.1.0)"
+  },
+  "baseline": {
+    "tag": "v0.1.0",
+    "commit": "881932c83e7d3c28dc67b846cc257a5819f023e9",
+    "description": "Forge 1.20.1 release installed in the Evil Eye pack"
+  },
+  "upstream": null,
+  "dependencies": [
+    {
+      "name": "NeoForge",
+      "coordinate": "net.neoforged:neoforge:21.1.265:universal",
+      "sha256": "c12cf1a6cb0aa7792b13174b06088a4f54d8bcc92f6a32fcb03310b456936847"
+    },
+    {
+      "name": "Dank Storage 20 (1.21.1)",
+      "coordinate": "curse.maven:dank-storage-335673:7539725",
+      "sha256": "7b9182495dfaab98bc45abc6c9dc251e88c90e83d451ade2f598e7cbaadf3a33",
+      "inspected": "tfar.dankstorage.world.DankSavedData#get (non-creating, DimensionDataStorage#get, key dankstorage/<frequency>), DankItem#getFrequency (dankstorage:frequency component), DankInventory auto-sort on setDirty(true)"
+    },
+    {
+      "name": "JEI",
+      "coordinate": "mezz.jei:jei-1.21.1-neoforge:19.70.0.464",
+      "sha256": "df3883c1f53780eacfb670c1c4252a4b9e3da3fea8469571aac5efc815459949",
+      "inspected": "RecipeTransferManager#getRecipeTransferHandler(AbstractContainerMenu, IRecipeCategory), IRecipeTransferHandlerHelper#getGuiSlotIndexToIngredientMap(RecipeHolder)"
+    },
+    {
+      "name": "EMI",
+      "coordinate": "dev.emi:emi-neoforge:1.1.24+1.21.1",
+      "sha256": "b68691f94f0727fc517cac2ab55bd6658d1179cc8cc715fe610b60c37469bc4c",
+      "inspected": "EmiRecipeFiller#getAllHandlers(AbstractContainerScreen), RecipeFillButtonWidget fields canFill/tooltip, RecipeButtonWidget#recipe, EmiRecipe#getBackingRecipe returns RecipeHolder"
+    },
+    {
+      "name": "Polymorph",
+      "coordinate": "curse.maven:polymorph-388800:8849478",
+      "version": "1.2.0+1.21.1",
+      "sha256": "4a09b7a3c8ea4f5b79acadb405a18140fe20d882e6930403c46cc7ad49c5ec06",
+      "inspected": "PolymorphApi#getPlayerRecipeData(Player), IRecipeData#selectRecipe(RecipeHolder)"
+    }
+  ],
+  "communityPatches": []
+}

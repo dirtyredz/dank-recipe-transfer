@@ -26,6 +26,7 @@ import net.minecraft.world.inventory.InventoryMenu;
 import net.minecraft.world.inventory.MenuType;
 import net.minecraft.world.item.crafting.CraftingRecipe;
 import net.minecraft.world.item.crafting.Ingredient;
+import net.minecraft.world.item.crafting.RecipeHolder;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.ArrayList;
@@ -136,7 +137,7 @@ public final class DankJeiTransferHandler<C extends AbstractContainerMenu, R> im
                     return transferHelper.createUserErrorWithTooltip(message("busy"));
                 }
                 if (doTransfer) {
-                    boolean sent = ClientTransfer.send(container, (CraftingRecipe) recipe, batches, outcome -> {
+                    boolean sent = ClientTransfer.send(container, ClientTransfer.craftingHolder(recipe), batches, outcome -> {
                         if (context != null) {
                             context.completeRecipeTransfer(outcome.success() ? RecipeTransferResult.SUCCESS : RecipeTransferResult.REJECTED);
                         }
@@ -148,7 +149,8 @@ public final class DankJeiTransferHandler<C extends AbstractContainerMenu, R> im
                 return null;
             }
             case MISSING -> {
-                List<IRecipeSlotView> missing = missingSlots((CraftingRecipe) recipe, recipeSlots, preflight.missingIngredientIndices());
+                List<IRecipeSlotView> missing = missingSlots(ClientTransfer.craftingHolder(recipe), recipeSlots,
+                        preflight.missingIngredientIndices());
                 Component text = Component.translatable("jei.tooltip.error.recipe.transfer.missing");
                 return missing.isEmpty() ? transferHelper.createUserErrorWithTooltip(text)
                         : transferHelper.createUserErrorForMissingSlots(text, missing);
@@ -166,12 +168,13 @@ public final class DankJeiTransferHandler<C extends AbstractContainerMenu, R> im
      * Maps recipe ingredient indices to JEI's displayed slots. JEI reports which ingredient each
      * of its gui slots shows, so the match is by ingredient identity rather than a copied layout.
      */
-    private List<IRecipeSlotView> missingSlots(CraftingRecipe recipe, IRecipeSlotsView recipeSlots, List<Integer> ingredientIndices) {
+    private List<IRecipeSlotView> missingSlots(RecipeHolder<CraftingRecipe> recipe, IRecipeSlotsView recipeSlots,
+                                               List<Integer> ingredientIndices) {
         List<IRecipeSlotView> inputs = recipeSlots.getSlotViews(RecipeIngredientRole.INPUT);
         Map<Integer, Ingredient> guiSlots = transferHelper.getGuiSlotIndexToIngredientMap(recipe);
         List<IRecipeSlotView> result = new ArrayList<>();
         for (int ingredientIndex : ingredientIndices) {
-            Ingredient ingredient = recipe.getIngredients().get(ingredientIndex);
+            Ingredient ingredient = recipe.value().getIngredients().get(ingredientIndex);
             for (Map.Entry<Integer, Ingredient> e : guiSlots.entrySet()) {
                 int gui = e.getKey();
                 if (e.getValue() == ingredient && gui >= 0 && gui < inputs.size() && !result.contains(inputs.get(gui))) {

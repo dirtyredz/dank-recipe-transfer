@@ -13,7 +13,7 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 import java.util.Optional;
 
 /**
- * Decorates JEI's native vanilla crafting handlers at lookup time (JEI 15.62.0.219). Every other
+ * Decorates JEI's native vanilla crafting handlers at lookup time (JEI 19.70.0.464; descriptor verified against that jar). Every other
  * handler is returned unchanged.
  */
 @Mixin(value = RecipeTransferManager.class, remap = false)

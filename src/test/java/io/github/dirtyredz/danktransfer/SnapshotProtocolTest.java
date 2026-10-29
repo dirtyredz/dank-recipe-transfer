@@ -89,6 +89,27 @@ class SnapshotProtocolTest {
     }
 
     @Test
+    void byteBudgetIsRelativeToTheSnapshotBody() {
+        // A payload codec writes after the packet id and channel header; those bytes must not
+        // count against the snapshot budget, and the reader sees only the body.
+        String big = "x".repeat(1000);
+        List<Entry<String>> entries = new ArrayList<>();
+        for (int i = 0; i < 1500; i++) {
+            entries.add(new Entry<>(big, 1));
+        }
+        FriendlyByteBuf plain = buf();
+        new Snapshot<>(1, 1, 1, true, false, entries).encode(plain, STRINGS);
+        FriendlyByteBuf framed = buf();
+        framed.writeBytes(new byte[4096]);
+        new Snapshot<>(1, 1, 1, true, false, entries).encode(framed, STRINGS);
+        assertEquals(plain.writerIndex() + 4096, framed.writerIndex(), "same body regardless of the header");
+        framed.skipBytes(4096);
+        Snapshot<String> out = Snapshot.decode(framed, STRINGS);
+        assertEquals(Snapshot.decode(plain, STRINGS), out);
+        assertTrue(out.truncated());
+    }
+
+    @Test
     void malformedPayloadsAreRejected() {
         // Non-positive count.
         FriendlyByteBuf negative = buf();

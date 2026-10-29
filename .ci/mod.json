@@ -1,22 +1,32 @@
 {
   "modId": "dank_recipe_transfer",
   "mainPackage": "io.github.dirtyredz.danktransfer",
+  "profile": "neoforge-1.21.1",
+  "releaseBranch": "neoforge-1.21.1",
   "datagen": false,
   "gametests": true,
   "packSide": "both",
   "jar": {
     "requiredEntries": [
       "dank_recipe_transfer.mixins.json",
-      "META-INF/MANIFEST.MF",
+      "META-INF/neoforge.mods.toml",
       "META-INF/LICENSE"
     ],
-    "manifestContains": [
-      "MixinConfigs: dank_recipe_transfer.mixins.json"
+    "manifestExcludes": [
+      "MixinConfigs"
     ],
     "entryContains": [
       {
+        "entry": "META-INF/neoforge.mods.toml",
+        "contains": "config=\"dank_recipe_transfer.mixins.json\""
+      },
+      {
         "entry": "dank_recipe_transfer.mixins.json",
         "contains": "io.github.dirtyredz.danktransfer.compat.MixinGate"
+      },
+      {
+        "entry": "dank_recipe_transfer.mixins.json",
+        "contains": "\"compatibilityLevel\": \"JAVA_21\""
       },
       {
         "entry": "META-INF/LICENSE",

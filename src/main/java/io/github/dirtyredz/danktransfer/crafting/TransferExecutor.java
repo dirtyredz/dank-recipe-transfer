@@ -12,9 +12,11 @@ import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.inventory.CraftingContainer;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.CraftingRecipe;
+import net.minecraft.world.item.crafting.RecipeHolder;
 
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -44,11 +46,13 @@ public final class TransferExecutor {
     }
 
     /**
-     * Places {@code batches} complete sets of {@code recipe} (or the maximum for
+     * Places {@code batches} complete sets of the {@code holder}'s recipe (or the maximum for
      * {@link TransferPlanner#MAX}) into the player's open vanilla crafting grid.
      * The caller has already checked the menu identity and request quantity.
      */
-    public TransferOutcome execute(ServerPlayer player, CraftingMenuAccess access, CraftingRecipe recipe, int batches) {
+    public TransferOutcome execute(ServerPlayer player, CraftingMenuAccess access, RecipeHolder<CraftingRecipe> holder,
+                                   int batches) {
+        CraftingRecipe recipe = holder.value();
         if (!access.menu().getCarried().isEmpty()) {
             return TransferOutcome.CURSOR_OCCUPIED;
         }
@@ -79,7 +83,7 @@ public final class TransferExecutor {
                 return TransferOutcome.INVALID_RECIPE;
             }
         }
-        return new Transaction(player, access, danks, plan).run(recipe);
+        return new Transaction(player, access, danks, plan).run(holder);
     }
 
     /** One journaled mutation. */
@@ -92,11 +96,10 @@ public final class TransferExecutor {
         private final CraftingContainer grid;
         private final List<ItemStack> gridJournal = new ArrayList<>();
         private final Map<Integer, ItemStack> inventoryJournal = new HashMap<>();
-        private final List<DankJournalEntry> dankJournal = new ArrayList<>();
+        /** One whole-store checkpoint per touched Dank, in first-touch order. */
+        private final Map<CarriedDank, CarriedDank.Checkpoint> dankJournal = new IdentityHashMap<>();
+        private final List<CarriedDank.Checkpoint> dankRestoreOrder = new ArrayList<>();
         private final Map<ItemKey, Long> extracted = new HashMap<>();
-
-        private record DankJournalEntry(CarriedDank dank, int slot, ItemStack original) {
-        }
 
         Transaction(ServerPlayer player, CraftingMenuAccess access, List<CarriedDank> danks,
                     TransferPlan<ItemKey> plan) {
@@ -108,7 +111,8 @@ public final class TransferExecutor {
             this.grid = access.craftContainer();
         }
 
-        TransferOutcome run(CraftingRecipe recipe) {
+        TransferOutcome run(RecipeHolder<CraftingRecipe> holder) {
+            CraftingRecipe recipe = holder.value();
             for (int i = 0; i < access.gridSize(); i++) {
                 gridJournal.add(access.gridSlot(i).getItem().copy());
             }
@@ -123,12 +127,11 @@ public final class TransferExecutor {
             // 1. Danks first: the only step that can partially fail.
             for (DankExtraction<ItemKey> extraction : plan.dankExtractions()) {
                 CarriedDank dank = danks.get(extraction.sourceId());
-                ItemStack original = dank.copySlot(extraction.slot());
-                if (!extraction.key().matches(original) || original.getCount() < extraction.count()) {
-                    rollback();
-                    return TransferOutcome.EXTRACTION_FAILED;
+                if (!dankJournal.containsKey(dank)) {
+                    CarriedDank.Checkpoint checkpoint = dank.checkpoint();
+                    dankJournal.put(dank, checkpoint);
+                    dankRestoreOrder.add(checkpoint);
                 }
-                dankJournal.add(new DankJournalEntry(dank, extraction.slot(), original));
                 int got = dank.extract(extraction.slot(), extraction.key(), extraction.count());
                 extracted.merge(extraction.key(), (long) got, Long::sum);
                 if (got != extraction.count()) {
@@ -151,12 +154,12 @@ public final class TransferExecutor {
                 rollback();
                 return TransferOutcome.EXTRACTION_FAILED;
             }
-            if (!recipe.matches(grid, player.level())) {
+            if (!recipe.matches(grid.asCraftInput(), player.level())) {
                 rollback();
                 return TransferOutcome.RECIPE_MISMATCH;
             }
 
-            PolymorphSelection.select(player, recipe);
+            PolymorphSelection.select(player, holder);
             access.menu().slotsChanged(grid);
             access.menu().broadcastChanges();
             return TransferOutcome.SUCCESS;
@@ -188,9 +191,8 @@ public final class TransferExecutor {
         }
 
         private void rollback() {
-            for (int i = dankJournal.size() - 1; i >= 0; i--) {
-                DankJournalEntry entry = dankJournal.get(i);
-                entry.dank().restore(entry.slot(), entry.original());
+            for (int i = dankRestoreOrder.size() - 1; i >= 0; i--) {
+                dankRestoreOrder.get(i).restore();
             }
             for (Map.Entry<Integer, ItemStack> entry : inventoryJournal.entrySet()) {
                 inventory.setItem(entry.getKey(), entry.getValue().copy());

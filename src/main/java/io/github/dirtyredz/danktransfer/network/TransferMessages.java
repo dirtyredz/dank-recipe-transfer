@@ -4,7 +4,6 @@ import io.github.dirtyredz.danktransfer.crafting.TransferOutcome;
 import io.netty.handler.codec.DecoderException;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.resources.ResourceLocation;
-import net.minecraft.world.item.ItemStack;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -19,7 +18,10 @@ import java.util.Objects;
 public final class TransferMessages {
     /** Snapshot entries beyond this are never sent; the snapshot is then marked truncated. */
     public static final int MAX_SNAPSHOT_ENTRIES = 2048;
-    /** Byte budget for one snapshot (Forge's clientbound custom payload limit is 1 MiB). */
+    /**
+     * Byte budget for one snapshot body, measured from where the snapshot starts in the buffer, not
+     * from the start of the packet (vanilla's clientbound custom payload limit is 1 MiB).
+     */
     public static final int MAX_SNAPSHOT_BYTES = 900_000;
     /** Largest finite batch count a client may request; {@link #MAX_BATCHES} asks for the maximum. */
     public static final int MAX_FINITE_BATCHES = 64;
@@ -28,29 +30,15 @@ public final class TransferMessages {
     private TransferMessages() {
     }
 
-    /** Reads and writes one item prototype. Production uses {@link #ITEMS}; tests use a fake. */
+    /**
+     * Reads and writes one item prototype. Production uses {@link ItemPrototypeCodec}; the pure
+     * protocol tests use a fake, so framing stays testable without a Minecraft bootstrap.
+     */
     public interface PrototypeCodec<T> {
         void write(FriendlyByteBuf buf, T prototype);
 
         T read(FriendlyByteBuf buf);
     }
-
-    /** Count-1 item prototypes with NBT, via vanilla's bounded item codec. */
-    public static final PrototypeCodec<ItemStack> ITEMS = new PrototypeCodec<>() {
-        @Override
-        public void write(FriendlyByteBuf buf, ItemStack prototype) {
-            buf.writeItem(prototype.copyWithCount(1));
-        }
-
-        @Override
-        public ItemStack read(FriendlyByteBuf buf) {
-            ItemStack stack = buf.readItem();
-            if (stack.isEmpty()) {
-                throw new DecoderException("empty snapshot prototype");
-            }
-            return stack;
-        }
-    };
 
     /** C2S: start ({@code active}) or stop watching Dank contents for an open crafting menu. */
     public record Subscribe(int menuId, boolean active) {
@@ -99,6 +87,7 @@ public final class TransferMessages {
         }
 
         public void encode(FriendlyByteBuf buf, PrototypeCodec<T> codec) {
+            int start = buf.writerIndex();
             buf.writeVarInt(menuId);
             buf.writeInt(session);
             buf.writeVarInt(revision);
@@ -114,7 +103,7 @@ public final class TransferMessages {
                 buf.writeBoolean(true);
                 codec.write(buf, entry.prototype());
                 buf.writeVarLong(entry.count());
-                if (buf.writerIndex() > MAX_SNAPSHOT_BYTES) {
+                if (buf.writerIndex() - start > MAX_SNAPSHOT_BYTES) {
                     buf.writerIndex(mark);
                     cut = true;
                     break;

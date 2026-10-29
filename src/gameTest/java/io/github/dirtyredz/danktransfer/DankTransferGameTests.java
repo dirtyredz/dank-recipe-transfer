@@ -17,9 +17,15 @@ import net.minecraft.world.inventory.CraftingMenu;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.item.crafting.CraftingRecipe;
-import net.minecraftforge.gametest.GameTestHolder;
-import net.minecraftforge.gametest.PrefixGameTestTemplate;
+import net.minecraft.world.item.crafting.RecipeHolder;
+import net.neoforged.neoforge.gametest.GameTestHolder;
+import net.neoforged.neoforge.gametest.PrefixGameTestTemplate;
+import tfar.dankstorage.init.ModDataComponentTypes;
+import tfar.dankstorage.item.DankItem;
+import tfar.dankstorage.utils.PickupMode;
+import tfar.dankstorage.utils.UseType;
 import tfar.dankstorage.world.DankInventoryForge;
+import tfar.dankstorage.world.DankSavedData;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -36,18 +42,19 @@ import static io.github.dirtyredz.danktransfer.GameTestFixtures.recipe;
 import static io.github.dirtyredz.danktransfer.GameTestFixtures.state;
 import static io.github.dirtyredz.danktransfer.GameTestFixtures.storage;
 
-/** Real Dank Storage 1.20.1-16 handlers driven through the server executor. */
+/** Real Dank Storage 1.21.1 (build 20) handlers driven through the server executor. */
 @GameTestHolder(DankRecipeTransfer.MOD_ID)
 @PrefixGameTestTemplate(false)
 public final class DankTransferGameTests {
     private DankTransferGameTests() {
     }
 
-    private static TransferOutcome run(ServerPlayer player, CraftingRecipe recipe, int batches) {
+    private static TransferOutcome run(ServerPlayer player, RecipeHolder<CraftingRecipe> recipe, int batches) {
         return run(TransferExecutor.standard(), player, recipe, batches);
     }
 
-    private static TransferOutcome run(TransferExecutor executor, ServerPlayer player, CraftingRecipe recipe, int batches) {
+    private static TransferOutcome run(TransferExecutor executor, ServerPlayer player, RecipeHolder<CraftingRecipe> recipe,
+                                       int batches) {
         return executor.execute(player, CraftingMenuAccess.of(player.containerMenu).orElseThrow(), recipe, batches);
     }
 
@@ -114,7 +121,7 @@ public final class DankTransferGameTests {
         ServerPlayer player = player(helper, "ghost");
         ItemStack carrier = newDank(level, 1);
         DankInventoryForge dank = storage(level, carrier);
-        dank.setGhostItem(2, Items.OAK_PLANKS);
+        dank.setGhostItem(2, new ItemStack(Items.OAK_PLANKS));
         dank.setStackInSlot(2, new ItemStack(Items.OAK_PLANKS, 2));
         player.getInventory().setItem(0, carrier);
         openTable(helper, player);
@@ -178,12 +185,12 @@ public final class DankTransferGameTests {
         player.getInventory().setItem(2, GameTestFixtures.carrier(1, 987_654));
 
         check(DankSource.discover(player).isEmpty(), "no valid store");
-        check(level.getDataStorage().get(tag -> null, "dankstorage/987654") == null, "discovery created no storage");
+        check(DankSavedData.get(987_654, level.getServer()) == null, "discovery created no storage");
         openTable(helper, player);
         String before = state(player, storage);
         check(run(player, recipe(level, "minecraft:stick"), 1) == TransferOutcome.MISSING, "nothing usable");
         check(before.equals(state(player, storage)), "nothing moved");
-        check(player.getInventory().getItem(0).getTag() == null || GameTestFixtures.frequency(player.getInventory().getItem(0)) < 0,
+        check(!player.getInventory().getItem(0).has(ModDataComponentTypes.FREQUENCY),
                 "unassigned carrier was not assigned a frequency");
         helper.succeed();
     }
@@ -209,20 +216,21 @@ public final class DankTransferGameTests {
         ServerLevel level = helper.getLevel();
         ServerPlayer player = player(helper, "settings");
         ItemStack carrier = newDank(level, 1);
-        CompoundTag settings = tfar.dankstorage.utils.CommonUtils.getOrCreateSettings(carrier);
-        settings.putInt(tfar.dankstorage.utils.CommonUtils.MODE, 2);
-        settings.putInt(tfar.dankstorage.utils.CommonUtils.CON, 1);
+        DankItem.setPickupMode(carrier, PickupMode.filtered_pickup);
+        DankItem.setUseType(carrier, UseType.construction);
         DankInventoryForge dank = storage(level, carrier);
         dank.setStackInSlot(0, new ItemStack(Items.OAK_PLANKS, 5));
+        dank.toggleFrequencyLock();
         player.getInventory().setItem(0, carrier);
-        CompoundTag before = carrier.getTag().copy();
-        int lockBefore = dank.get(2);
+        ItemStack before = carrier.copy();
+        boolean lockBefore = dank.frequencyLocked();
         openTable(helper, player);
 
         check(run(player, recipe(level, "minecraft:stick"), 1) == TransferOutcome.SUCCESS, "transfer");
-        check(before.equals(player.getInventory().getItem(0).getTag()), "carrier NBT unchanged");
-        check(dank.get(2) == lockBefore, "frequency lock unchanged");
-        check(dank.getDankStats() == GameTestFixtures.dankItem(1).stats, "tier unchanged");
+        check(ItemStack.isSameItemSameComponents(before, player.getInventory().getItem(0)),
+                "carrier components unchanged: " + player.getInventory().getItem(0).getComponentsPatch());
+        check(lockBefore && dank.frequencyLocked(), "frequency lock unchanged");
+        check(GameTestFixtures.savedData(level, carrier).getStats() == GameTestFixtures.dankItem(1).stats, "tier unchanged");
         helper.succeed();
     }
 
@@ -251,8 +259,8 @@ public final class DankTransferGameTests {
                         return real.extract(slot, key, count);
                     }
 
-                    public void restore(int slot, ItemStack original) {
-                        real.restore(slot, original);
+                    public Checkpoint checkpoint() {
+                        return real.checkpoint();
                     }
 
                     public boolean isDirty() {
@@ -270,7 +278,7 @@ public final class DankTransferGameTests {
         ServerPlayer player = player(helper, "rollback");
         ItemStack carrier = newDank(level, 1);
         DankInventoryForge dank = storage(level, carrier);
-        dank.setGhostItem(0, Items.COAL);
+        dank.setGhostItem(0, new ItemStack(Items.COAL));
         dank.setStackInSlot(0, new ItemStack(Items.COAL, 8));
         dank.setStackInSlot(1, new ItemStack(Items.STICK, 8));
         player.getInventory().setItem(0, carrier);
@@ -320,9 +328,9 @@ public final class DankTransferGameTests {
         check(run(player, recipe(level, "minecraft:stick"), 1) == TransferOutcome.SUCCESS, "transfer");
         check(GameTestFixtures.savedData(level, carrier).isDirty(), "Dank saved data marked dirty for persistence");
         // Round-trip the saved form, as a save and reload would.
-        CompoundTag saved = GameTestFixtures.savedData(level, carrier).save(new CompoundTag());
-        tfar.dankstorage.inventory.DankInterface reloaded = tfar.dankstorage.world.CDankSavedData
-                .loadStatic(saved, level).createInventory(GameTestFixtures.frequency(carrier));
+        CompoundTag saved = GameTestFixtures.savedData(level, carrier).save(new CompoundTag(), level.registryAccess());
+        tfar.dankstorage.inventory.DankInventory reloaded = DankSavedData
+                .loadStatic(saved, level, GameTestFixtures.frequency(carrier)).getOrCreateInventory();
         check(reloaded.getItemDank(0).is(Items.OAK_PLANKS) && reloaded.getItemDank(0).getCount() == 3,
                 "reloaded contents show 3 planks: " + reloaded.getItemDank(0));
         helper.succeed();
@@ -348,6 +356,98 @@ public final class DankTransferGameTests {
         check(run(bob, recipe(level, "minecraft:stick"), TransferPlanner.MAX) == TransferOutcome.SUCCESS, "bob transfers");
         check(count(dank, Items.OAK_PLANKS) == 0, "both drew from one store");
         check(run(alice, recipe(level, "minecraft:stick"), 1) == TransferOutcome.MISSING, "alice cannot overdraw");
+        helper.succeed();
+    }
+
+    private static ItemStack named(net.minecraft.world.item.Item item, int count, String name) {
+        ItemStack stack = new ItemStack(item, count);
+        stack.set(net.minecraft.core.component.DataComponents.CUSTOM_NAME, net.minecraft.network.chat.Component.literal(name));
+        return stack;
+    }
+
+    @GameTest(template = TEMPLATE)
+    public static void componentsSurviveExtraction(GameTestHelper helper) {
+        ServerLevel level = helper.getLevel();
+        ServerPlayer player = player(helper, "components");
+        ItemStack carrier = newDank(level, 1);
+        DankInventoryForge dank = storage(level, carrier);
+        dank.setStackInSlot(0, named(Items.OAK_PLANKS, 5, "Heirloom"));
+        dank.setStackInSlot(1, new ItemStack(Items.OAK_PLANKS, 5));
+        player.getInventory().setItem(0, carrier);
+
+        Map<ItemKey, Long> totals = DankSnapshotService.aggregate(DankSource.discover(player));
+        check(totals.size() == 2, "named and plain planks are distinct keys: " + totals);
+        check(totals.get(ItemKey.of(named(Items.OAK_PLANKS, 1, "Heirloom"))) == 5L, "named total: " + totals);
+
+        CraftingMenu menu = openTable(helper, player);
+        check(run(player, recipe(level, "minecraft:stick"), 1) == TransferOutcome.SUCCESS, "transfer");
+        ItemStack placed = menu.getSlot(1).getItem();
+        check(placed.is(Items.OAK_PLANKS) && placed.getCount() == 1, "one plank per slot: " + placed);
+        check(ItemStack.isSameItemSameComponents(placed, menu.getSlot(4).getItem()), "one identity per set");
+        int named = 0;
+        int plain = 0;
+        for (int i = 0; i < dank.getSlots(); i++) {
+            ItemStack stack = dank.getStackInSlot(i);
+            if (stack.has(net.minecraft.core.component.DataComponents.CUSTOM_NAME)) {
+                named += stack.getCount();
+            } else if (stack.is(Items.OAK_PLANKS)) {
+                plain += stack.getCount();
+            }
+        }
+        check(named + plain == 8, "exactly two planks left the Dank: named " + named + ", plain " + plain);
+        check(placed.has(net.minecraft.core.component.DataComponents.CUSTOM_NAME) ? named == 3 : plain == 3,
+                "the placed identity is the one that was extracted: " + GameTestFixtures.describe(placed));
+        helper.succeed();
+    }
+
+    @GameTest(template = TEMPLATE)
+    public static void rollbackRestoresComponentStacks(GameTestHelper helper) {
+        ServerLevel level = helper.getLevel();
+        ServerPlayer player = player(helper, "componentrollback");
+        ItemStack carrier = newDank(level, 1);
+        DankInventoryForge dank = storage(level, carrier);
+        dank.setStackInSlot(0, named(Items.COAL, 8, "Charcoal-ish"));
+        dank.setStackInSlot(1, named(Items.STICK, 8, "Twig"));
+        player.getInventory().setItem(0, carrier);
+        openTable(helper, player);
+        String before = state(player, dank);
+
+        TransferOutcome outcome = run(shortOn(Items.STICK), player, recipe(level, "minecraft:torch"), 4);
+        check(outcome == TransferOutcome.EXTRACTION_FAILED, "fault expected, got " + outcome);
+        check(before.equals(state(player, dank)), "named stacks restored with their components:\nbefore " + before
+                + "\nafter  " + state(player, dank));
+        helper.succeed();
+    }
+
+    /**
+     * Dank 20's auto-sort re-sorts a store after every change, so extracted slots move mid-transfer. The
+     * transfer must still take the planned amounts, and a rollback must restore the exact pre-transfer store.
+     */
+    @GameTest(template = TEMPLATE)
+    public static void autoSortedStoreTransfersAndRollsBack(GameTestHelper helper) {
+        ServerLevel level = helper.getLevel();
+        ServerPlayer player = player(helper, "autosort");
+        ItemStack carrier = newDank(level, 1);
+        DankInventoryForge dank = storage(level, carrier);
+        dank.setStackInSlot(4, new ItemStack(Items.STICK, 3));
+        dank.setStackInSlot(2, new ItemStack(Items.COAL, 9));
+        dank.setStackInSlot(0, new ItemStack(Items.STICK, 5));
+        dank.setGhostItem(6, new ItemStack(Items.COAL));
+        if (!dank.autoSort()) {
+            dank.toggleAutoSort();
+        }
+        player.getInventory().setItem(0, carrier);
+        openTable(helper, player);
+        String before = state(player, dank);
+
+        TransferOutcome failed = run(shortOn(Items.STICK), player, recipe(level, "minecraft:torch"), 8);
+        check(failed == TransferOutcome.EXTRACTION_FAILED, "fault expected, got " + failed);
+        check(before.equals(state(player, dank)), "auto-sorted store restored exactly:\nbefore " + before
+                + "\nafter  " + state(player, dank));
+
+        check(run(player, recipe(level, "minecraft:torch"), 8) == TransferOutcome.SUCCESS, "real transfer");
+        check(count(dank, Items.STICK) == 0 && count(dank, Items.COAL) == 1, "8 sticks and 8 coal taken: sticks "
+                + count(dank, Items.STICK) + ", coal " + count(dank, Items.COAL));
         helper.succeed();
     }
 }

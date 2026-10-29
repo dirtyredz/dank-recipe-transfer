@@ -29,6 +29,7 @@ import net.minecraft.world.inventory.InventoryMenu;
 import net.minecraft.world.inventory.Slot;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.CraftingRecipe;
+import net.minecraft.world.item.crafting.RecipeHolder;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.ArrayList;
@@ -126,7 +127,9 @@ public final class DankEmiTransferHandler<T extends AbstractContainerMenu> imple
                 || !delegate.supportsRecipe(recipe)) {
             return null;
         }
-        if (!(recipe.getBackingRecipe() instanceof CraftingRecipe crafting)) {
+        // EMI 1.21 backs vanilla recipes with their RecipeHolder; the holder carries the id.
+        RecipeHolder<CraftingRecipe> crafting = ClientTransfer.craftingHolder(recipe.getBackingRecipe());
+        if (crafting == null) {
             return null;
         }
         int amount = context.getAmount();
@@ -150,7 +153,7 @@ public final class DankEmiTransferHandler<T extends AbstractContainerMenu> imple
         if (preflight == null || !preflight.needsDank()) {
             return delegate.craft(recipe, context);
         }
-        CraftingRecipe crafting = (CraftingRecipe) recipe.getBackingRecipe();
+        RecipeHolder<CraftingRecipe> crafting = ClientTransfer.craftingHolder(recipe.getBackingRecipe());
         int amount = context.getAmount();
         int batches = amount == Integer.MAX_VALUE ? TransferPlanner.MAX : Math.max(1, amount);
         boolean sent = ClientTransfer.send(context.getScreenHandler(), crafting, batches, outcome -> {

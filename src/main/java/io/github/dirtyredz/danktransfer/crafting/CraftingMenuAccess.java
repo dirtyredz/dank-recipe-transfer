@@ -24,7 +24,7 @@ import java.util.function.Predicate;
  * inventory grid ({@link InventoryMenu}). A subclass is accepted only if it keeps the vanilla
  * slot layout (46 slots, crafting container behind the grid).
  *
- * <p>Menu slot layouts (vanilla 1.20.1):
+ * <p>Menu slot layouts (vanilla 1.21.1):
  * <ul>
  *   <li>CraftingMenu: 0 result, 1-9 grid, 10-36 main inventory, 37-45 hotbar.</li>
  *   <li>InventoryMenu: 0 result, 1-4 grid, 5-8 armor, 9-35 main inventory, 36-44 hotbar, 45 offhand.</li>

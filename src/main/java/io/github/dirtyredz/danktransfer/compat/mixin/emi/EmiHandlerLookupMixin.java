@@ -13,7 +13,7 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 import java.util.List;
 
 /**
- * Decorates EMI's native vanilla crafting handlers where EMI collects them (EMI 1.1.24). EMI's
+ * Decorates EMI's native vanilla crafting handlers where EMI collects them (EMI 1.1.24+1.21.1; descriptor verified against that jar). EMI's
  * native handlers come before JEMI, so the JEI integration alone cannot cover EMI.
  */
 @Mixin(value = EmiRecipeFiller.class, remap = false)

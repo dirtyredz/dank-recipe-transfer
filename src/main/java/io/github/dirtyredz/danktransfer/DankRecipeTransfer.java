@@ -5,11 +5,11 @@ import io.github.dirtyredz.danktransfer.network.ServerRequestHandler;
 import io.github.dirtyredz.danktransfer.network.TransferChannel;
 import io.github.dirtyredz.danktransfer.sync.DankSnapshotService;
 import net.minecraft.server.level.ServerPlayer;
-import net.minecraftforge.common.MinecraftForge;
-import net.minecraftforge.event.TickEvent;
-import net.minecraftforge.event.entity.player.PlayerEvent;
-import net.minecraftforge.eventbus.api.EventPriority;
-import net.minecraftforge.fml.common.Mod;
+import net.neoforged.bus.api.IEventBus;
+import net.neoforged.fml.common.Mod;
+import net.neoforged.neoforge.common.NeoForge;
+import net.neoforged.neoforge.event.entity.player.PlayerEvent;
+import net.neoforged.neoforge.event.tick.ServerTickEvent;
 
 /**
  * Bootstrap. Loads on both sides with neither JEI nor EMI present; viewer integration is applied
@@ -21,17 +21,13 @@ public final class DankRecipeTransfer {
 
     private static ServerRequestHandler server;
 
-    public DankRecipeTransfer() {
-        DankSnapshotService snapshots = new DankSnapshotService(TransferChannel::sendTo);
+    public DankRecipeTransfer(IEventBus modBus) {
+        DankSnapshotService snapshots = new DankSnapshotService(TransferChannel::sendSnapshot);
         server = new ServerRequestHandler(snapshots, TransferExecutor.standard());
-        TransferChannel.register(server);
+        TransferChannel.register(modBus, server);
 
-        MinecraftForge.EVENT_BUS.addListener(EventPriority.NORMAL, false, TickEvent.ServerTickEvent.class, event -> {
-            if (event.phase == TickEvent.Phase.END) {
-                snapshots.tick(event.getServer());
-            }
-        });
-        MinecraftForge.EVENT_BUS.addListener(EventPriority.NORMAL, false, PlayerEvent.PlayerLoggedOutEvent.class, event -> {
+        NeoForge.EVENT_BUS.addListener(ServerTickEvent.Post.class, event -> snapshots.tick(event.getServer()));
+        NeoForge.EVENT_BUS.addListener(PlayerEvent.PlayerLoggedOutEvent.class, event -> {
             if (event.getEntity() instanceof ServerPlayer player) {
                 snapshots.forget(player);
             }

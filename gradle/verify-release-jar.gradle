@@ -6,9 +6,10 @@ import java.util.zip.ZipOutputStream
 import java.util.regex.Pattern
 
 apply from: 'gradle/test-world.gradle'
+apply from: 'gradle/build-profile.gradle'
 
-// Publish retries compare exact bytes. ForgeGradle reobfJar consumes this archive in place;
-// it is a RenameJarInPlace task, not an AbstractArchiveTask with these properties.
+// Publish retries compare exact bytes. On Forge, ForgeGradle reobfJar consumes this archive in place
+// (a RenameJarInPlace task, not an AbstractArchiveTask); on NeoForge the jar task is final.
 tasks.withType(AbstractArchiveTask).configureEach {
     preserveFileTimestamps = false
     reproducibleFileOrder = true
@@ -45,8 +46,9 @@ class ReleaseJarGuard {
         }
     }
 
-    static void verify(File jar, String expectedName, String modId, String version,
-                       String packagePath, Set<String> mainClasses, Set<String> testResources, Map worldSpec, Map jarSpec = [:]) {
+    /** metadataSpec: [path: this loader's metadata file, forbidden: other loaders' metadata that must be absent]. */
+    static void verify(File jar, String expectedName, String modId, String version, String packagePath,
+                       Set<String> mainClasses, Set<String> testResources, Map worldSpec, Map metadataSpec, Map jarSpec = [:]) {
         validateJarSpec(jarSpec)
         if (jar.name != expectedName) throw new GradleException("Unexpected release filename: ${jar.name}")
         new ZipFile(jar).withCloseable { zip ->
@@ -83,8 +85,11 @@ class ReleaseJarGuard {
                     throw new GradleException("Jar entry ${check.entry} does not contain: ${check.contains}")
                 }
             }
-            def metadata = zip.getEntry('META-INF/mods.toml')
-            if (!metadata) throw new GradleException('Missing META-INF/mods.toml')
+            def metadata = zip.getEntry(metadataSpec.path)
+            if (!metadata) throw new GradleException("Missing ${metadataSpec.path}")
+            (metadataSpec.forbidden ?: []).each { other ->
+                if (zip.getEntry(other)) throw new GradleException("Wrong loader metadata in release jar: ${other}")
+            }
             def toml = zip.getInputStream(metadata).getText('UTF-8')
             if (toml.contains('${') || !(toml =~ /(?m)^\s*version\s*=\s*"${Pattern.quote(version)}"\s*$/).find()
                     || !(toml =~ /(?m)^\s*modId\s*=\s*"${Pattern.quote(modId)}"\s*$/).find()) {
@@ -175,7 +180,7 @@ tasks.register('testReleaseJarVerifier') {
             try {
                 ReleaseJarGuard.verify(jar, 'fixture.jar', 'fixture', '1.0', 'example/mod',
                         ['example/mod/Main.class'] as Set, ['data/fixture/structures/empty.nbt'] as Set, testWorldSpec,
-                        label == 'noCustomChecks' ? [:] : jarSpec)
+                        [path: 'META-INF/mods.toml', forbidden: []], label == 'noCustomChecks' ? [:] : jarSpec)
             } catch (GradleException e) { failure = e.message }
             if ((label in ['clean', 'noCustomChecks']) != (failure == null)) {
                 throw new GradleException("Jar guard regression ${label}: ${failure ?: 'contamination accepted'}")
@@ -219,13 +224,43 @@ tasks.register('testReleaseJarVerifier') {
                 if (failure && !failure.contains('runGameTestServer')) throw new GradleException(failure)
             }
         }
+        // Every declared profile, whichever this mod uses: its own metadata is required, other loaders' is refused,
+        // and only Forge depends on reobfuscation.
+        new JsonSlurper().parse(file('.ci/build-profiles.json')).profiles.each { name, profile ->
+            if ((profile.loader == 'forge') != (profile.archiveTask == 'reobfJar')) {
+                throw new GradleException("Profile ${name} final archive regression: ${profile.archiveTask}")
+            }
+            def metadata = [path: profile.metadata, forbidden: profile.forbiddenMetadata]
+            def toml = 'modId="fixture"\nversion="1.0"\n'
+            def scenarios = [clean: [(profile.metadata): toml]]
+            profile.forbiddenMetadata.each { scenarios["foreign ${it}".toString()] = [(profile.metadata): toml, (it): toml] }
+            def other = profile.metadata == 'META-INF/mods.toml' ? 'META-INF/neoforge.mods.toml' : 'META-INF/mods.toml'
+            scenarios["only ${other}".toString()] = [(other): toml]
+            scenarios.each { label, metadataEntries ->
+                def jar = new File(dir, 'fixture.jar')
+                new ZipOutputStream(new FileOutputStream(jar)).withCloseable { out ->
+                    (metadataEntries + ['example/mod/Main.class': 'fixture bytes']).each { path, content ->
+                        out.putNextEntry(new ZipEntry(path)); out.write(content.getBytes('UTF-8')); out.closeEntry()
+                    }
+                }
+                String failure = null
+                try {
+                    ReleaseJarGuard.verify(jar, 'fixture.jar', 'fixture', '1.0', 'example/mod', ['example/mod/Main.class'] as Set,
+                            [] as Set, testWorldSpec, metadata)
+                } catch (GradleException e) { failure = e.message }
+                def expected = label == 'clean' ? null : label.startsWith('foreign')
+                        ? "Wrong loader metadata in release jar: ${label.substring(8)}".toString() : "Missing ${profile.metadata}".toString()
+                if (failure != expected) throw new GradleException("Profile ${name} metadata ${label}: ${failure ?: 'accepted'}")
+                logger.lifecycle("Jar guard profile ${name} ${label}: ${failure ?: 'PASS'}")
+            }
+        }
     }
 }
 
 tasks.register('verifyReleaseJar') {
     group = 'verification'
-    description = 'Verify and stage only the final reobfuscated production jar.'
-    dependsOn 'reobfJar', 'testReleaseJarVerifier'
+    description = "Verify and stage only the final production jar (the build profile's ${buildProfile.archiveTask} output)."
+    dependsOn buildProfile.archiveTask, 'testReleaseJarVerifier'
     dependsOn tasks.matching { it.name == 'testGameTestWorld' }
     doLast {
         def config = new JsonSlurper().parse(file('.ci/mod.json'))
@@ -242,10 +277,14 @@ tasks.register('verifyReleaseJar') {
         if (!(releaseVersion ==~ /(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:-[0-9A-Za-z.-]+)?/)) {
             throw new GradleException('Expected semantic mod_version')
         }
-        def expected = "${config.modId}-${minecraft_version}-${releaseVersion}.jar".toString()
+        def identity = releaseIdentity(config.modId, releaseVersion)
+        def expected = identity.jarFilename
         def manifest = [modId: config.modId, name: mod_name.toString(), version: releaseVersion,
-                        tag: "v${releaseVersion}".toString(), side: config.packSide, jarFilename: expected,
-                        prerelease: releaseVersion.startsWith('0.') || releaseVersion.contains('-')]
+                        tag: identity.tag, side: config.packSide, jarFilename: expected,
+                        prerelease: releaseVersion.startsWith('0.') || releaseVersion.contains('-'),
+                        profile: buildProfile.name, loader: buildProfile.loader, minecraft: buildProfile.minecraft,
+                        identity: buildProfile.identity, releaseBranch: buildProfile.releaseBranch,
+                        sourceSha: sourceCommit(), provenance: portProvenance()]
         Set<String> classes = [] as Set
         sourceSets.main.output.classesDirs.each { root ->
             fileTree(root).matching { include '**/*.class' }.visit { detail ->
@@ -260,7 +299,8 @@ tasks.register('verifyReleaseJar') {
             }
         }
         ReleaseJarGuard.verify(jar, expected, config.modId, mod_version.toString(),
-                config.mainPackage.replace('.', '/'), classes, resources, testWorldSpec, jarSpec)
+                config.mainPackage.replace('.', '/'), classes, resources, testWorldSpec,
+                [path: buildProfile.metadata, forbidden: buildProfile.forbiddenMetadata], jarSpec)
         // Downstream upload paths cannot accidentally pick a sources/dev jar.
         project.sync { spec ->
             spec.from(jar)
@@ -268,6 +308,29 @@ tasks.register('verifyReleaseJar') {
         }
         def manifestFile = layout.buildDirectory.file('ci/release.json').get().asFile
         manifestFile.setText(JsonOutput.prettyPrint(JsonOutput.toJson(manifest)) + '\n', 'UTF-8')
-        logger.lifecycle("Verified release jar: ${jar.name} (${classes.size()} compiled main classes)")
+        logger.lifecycle("Verified release jar: ${jar.name} (${classes.size()} compiled main classes, profile ${buildProfile.name})")
     }
+}
+
+// The exact commit the jar was built from: CI's GITHUB_SHA, else the local checkout's HEAD.
+ext.sourceCommit = { ->
+    def sha = System.getenv('GITHUB_SHA')
+    if (!sha) {
+        try {
+            def process = ['git', 'rev-parse', 'HEAD'].execute(null, projectDir)
+            sha = process.waitFor() == 0 ? process.text.trim() : null
+        } catch (IOException ignored) { sha = null }
+    }
+    return sha ==~ /[0-9a-f]{40}/ ? sha : null
+}
+
+// Optional .ci/port-provenance.json (fork/branch ancestry and dependency evidence) travels with the manifest.
+ext.portProvenance = { ->
+    def provenance = file('.ci/port-provenance.json')
+    if (!provenance.isFile()) return null
+    def parsed = new JsonSlurper().parse(provenance)
+    if (!(parsed instanceof Map) || !parsed.branchStart || !parsed.baseline) {
+        throw new GradleException('.ci/port-provenance.json needs branchStart and baseline')
+    }
+    return parsed
 }

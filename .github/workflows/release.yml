@@ -1,5 +1,7 @@
 # Releases follow Command Deck's deliberate dispatch model: pushes only run CI.
-# The agent starts this on main with: gh workflow run release.yml --ref main
+# The agent starts this on the release branch declared by .ci/mod.json (default main):
+#   gh workflow run release.yml --ref <releaseBranch>
+# Every build job and the publish step refuse any other branch for the mod's build profile.
 # verify + gametest (read-only) -> build (read-only, exact artifact ID) -> publish.
 # Publication refuses reused versions/tags, creates a tag at the built commit, uploads
 # a draft, downloads and hashes every asset, then publishes. No owner hand-publication.
@@ -21,7 +23,7 @@ concurrency:
 
 jobs:
   verify:
-    if: github.ref == 'refs/heads/main'
+    if: github.ref_type == 'branch'
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     permissions:
@@ -32,11 +34,13 @@ jobs:
           ref: ${{ github.sha }}
           persist-credentials: false
       - uses: ./.github/actions/setup-mod-build
+        with:
+          release: 'true'
       - name: Verify
         run: node .ci/scripts/verify.mjs
 
   gametest:
-    if: github.ref == 'refs/heads/main'
+    if: github.ref_type == 'branch'
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     permissions:
@@ -47,6 +51,8 @@ jobs:
           ref: ${{ github.sha }}
           persist-credentials: false
       - uses: ./.github/actions/setup-mod-build
+        with:
+          release: 'true'
       # The job succeeds without launching Forge when GameTests are not configured.
       # Keeping the job in the graph means publish can require every job to succeed.
       - name: Release GameTests
@@ -70,7 +76,7 @@ jobs:
 
   build:
     needs: [verify, gametest]
-    if: github.ref == 'refs/heads/main'
+    if: github.ref_type == 'branch'
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     permissions:
@@ -83,6 +89,8 @@ jobs:
           ref: ${{ github.sha }}
           persist-credentials: false
       - uses: ./.github/actions/setup-mod-build
+        with:
+          release: 'true'
       - name: Build the release artifact
         run: |
           chmod +x gradlew
@@ -101,7 +109,7 @@ jobs:
 
   publish:
     needs: [verify, gametest, build]
-    if: github.ref == 'refs/heads/main'
+    if: github.ref_type == 'branch'
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     permissions:

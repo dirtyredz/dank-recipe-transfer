@@ -1,101 +1,97 @@
 package io.github.dirtyredz.danktransfer.network;
 
-import io.github.dirtyredz.danktransfer.DankRecipeTransfer;
-import io.github.dirtyredz.danktransfer.client.ClientTransfer;
+import io.github.dirtyredz.danktransfer.client.ClientPayloadHandler;
 import io.github.dirtyredz.danktransfer.network.TransferMessages.Snapshot;
-import io.github.dirtyredz.danktransfer.network.TransferMessages.Subscribe;
-import io.github.dirtyredz.danktransfer.network.TransferMessages.TransferRequest;
 import io.github.dirtyredz.danktransfer.network.TransferMessages.TransferResult;
-import net.minecraft.network.Connection;
-import net.minecraft.resources.ResourceLocation;
+import io.github.dirtyredz.danktransfer.network.payload.SnapshotPayload;
+import io.github.dirtyredz.danktransfer.network.payload.SubscribePayload;
+import io.github.dirtyredz.danktransfer.network.payload.TransferRequestPayload;
+import io.github.dirtyredz.danktransfer.network.payload.TransferResultPayload;
+import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.ItemStack;
-import net.minecraftforge.api.distmarker.Dist;
-import net.minecraftforge.common.util.FakePlayer;
-import net.minecraftforge.fml.DistExecutor;
-import net.minecraftforge.network.NetworkDirection;
-import net.minecraftforge.network.NetworkRegistry;
-import net.minecraftforge.network.PacketDistributor;
-import net.minecraftforge.network.simple.SimpleChannel;
+import net.neoforged.bus.api.IEventBus;
+import net.neoforged.neoforge.common.extensions.ICommonPacketListener;
+import net.neoforged.neoforge.common.util.FakePlayer;
+import net.neoforged.neoforge.network.PacketDistributor;
+import net.neoforged.neoforge.network.event.RegisterPayloadHandlersEvent;
+import net.neoforged.neoforge.network.handling.IPayloadContext;
+import net.neoforged.neoforge.network.registration.HandlerThread;
+import net.neoforged.neoforge.network.registration.PayloadRegistrar;
+import org.jetbrains.annotations.Nullable;
 
 /**
- * Protocol registration, direction checks and thread dispatch. No viewer dependencies.
+ * Payload registration, direction checks and thread dispatch. No viewer dependencies.
  *
- * <p>The channel accepts a peer without it ({@code acceptMissingOr}), so a vanilla client or a
- * server without this mod still connects; the client adapters then fall back to native transfer.
+ * <p>All four payloads are registered {@code optional()}, so a vanilla client or a server without this
+ * mod still connects; nothing is sent to a peer that did not negotiate the payload, and the client
+ * adapters then fall back to native transfer. Protocol {@value #PROTOCOL} is a new wire format: a
+ * Forge 1.20.1 peer never interoperates with it.
+ *
+ * <p>Client callbacks are reached only through lambdas, so a dedicated server never loads
+ * {@link ClientPayloadHandler} (clientbound handlers never run there).
  */
 public final class TransferChannel {
-    public static final String PROTOCOL = "1";
+    public static final String PROTOCOL = "2";
 
-    private static SimpleChannel channel;
     private static ServerRequestHandler server;
 
     private TransferChannel() {
     }
 
-    @SuppressWarnings("removal") // the (namespace, path) constructor keeps Forge 47.0-47.2 support
-    public static void register(ServerRequestHandler handler) {
+    public static void register(IEventBus modBus, ServerRequestHandler handler) {
         server = handler;
-        channel = NetworkRegistry.ChannelBuilder
-                .named(new ResourceLocation(DankRecipeTransfer.MOD_ID, "transfer"))
-                .networkProtocolVersion(() -> PROTOCOL)
-                .clientAcceptedVersions(NetworkRegistry.acceptMissingOr(PROTOCOL))
-                .serverAcceptedVersions(NetworkRegistry.acceptMissingOr(PROTOCOL))
-                .simpleChannel();
-
-        channel.messageBuilder(Subscribe.class, 0, NetworkDirection.PLAY_TO_SERVER)
-                .encoder(Subscribe::encode)
-                .decoder(Subscribe::decode)
-                .consumerMainThread((msg, ctx) -> {
-                    ServerPlayer sender = ctx.get().getSender();
-                    if (sender != null) {
-                        server.onSubscribe(sender, msg);
-                    }
-                })
-                .add();
-
-        channel.messageBuilder(TransferRequest.class, 1, NetworkDirection.PLAY_TO_SERVER)
-                .encoder(TransferRequest::encode)
-                .decoder(TransferRequest::decode)
-                .consumerMainThread((msg, ctx) -> {
-                    ServerPlayer sender = ctx.get().getSender();
-                    if (sender != null) {
-                        sendTo(sender, new TransferResult(msg.requestId(), server.onTransfer(sender, msg)));
-                    }
-                })
-                .add();
-
-        @SuppressWarnings({"unchecked", "rawtypes"})
-        Class<Snapshot<ItemStack>> snapshotClass = (Class) Snapshot.class;
-        channel.messageBuilder(snapshotClass, 2, NetworkDirection.PLAY_TO_CLIENT)
-                .encoder((msg, buf) -> msg.encode(buf, TransferMessages.ITEMS))
-                .decoder(buf -> Snapshot.decode(buf, TransferMessages.ITEMS))
-                .consumerMainThread((msg, ctx) ->
-                        DistExecutor.unsafeRunWhenOn(Dist.CLIENT, () -> () -> ClientTransfer.onSnapshot(msg)))
-                .add();
-
-        channel.messageBuilder(TransferResult.class, 3, NetworkDirection.PLAY_TO_CLIENT)
-                .encoder(TransferResult::encode)
-                .decoder(TransferResult::decode)
-                .consumerMainThread((msg, ctx) ->
-                        DistExecutor.unsafeRunWhenOn(Dist.CLIENT, () -> () -> ClientTransfer.onResult(msg)))
-                .add();
+        modBus.addListener(RegisterPayloadHandlersEvent.class, TransferChannel::onRegister);
     }
 
-    /** Whether the other end of {@code connection} runs this protocol. */
-    public static boolean isRemotePresent(Connection connection) {
-        return channel != null && connection != null && channel.isRemotePresent(connection);
+    private static void onRegister(RegisterPayloadHandlersEvent event) {
+        // Game-state work runs on the main thread; every handler below touches menus or storage.
+        PayloadRegistrar registrar = event.registrar(PROTOCOL).optional().executesOn(HandlerThread.MAIN);
+        registrar.playToServer(SubscribePayload.TYPE, SubscribePayload.STREAM_CODEC, (payload, context) -> {
+            ServerPlayer sender = serverSender(context);
+            if (sender != null) {
+                server.onSubscribe(sender, payload.message());
+            }
+        });
+        registrar.playToServer(TransferRequestPayload.TYPE, TransferRequestPayload.STREAM_CODEC, (payload, context) -> {
+            ServerPlayer sender = serverSender(context);
+            if (sender != null) {
+                TransferResult result = new TransferResult(payload.message().requestId(),
+                        server.onTransfer(sender, payload.message()));
+                send(sender, new TransferResultPayload(result));
+            }
+        });
+        registrar.playToClient(SnapshotPayload.TYPE, SnapshotPayload.STREAM_CODEC,
+                (payload, context) -> ClientPayloadHandler.onSnapshot(payload));
+        registrar.playToClient(TransferResultPayload.TYPE, TransferResultPayload.STREAM_CODEC,
+                (payload, context) -> ClientPayloadHandler.onResult(payload));
     }
 
-    public static void sendTo(ServerPlayer player, Object message) {
-        if (channel != null && player.connection != null && !(player instanceof FakePlayer)) {
-            channel.send(PacketDistributor.PLAYER.with(() -> player), message);
+    @Nullable
+    private static ServerPlayer serverSender(IPayloadContext context) {
+        return context.player() instanceof ServerPlayer player ? player : null;
+    }
+
+    /** Whether the other end of {@code listener} negotiated this mod's payloads. */
+    public static boolean isRemotePresent(@Nullable ICommonPacketListener listener) {
+        return listener != null && listener.hasChannel(SubscribePayload.TYPE) && listener.hasChannel(SnapshotPayload.TYPE);
+    }
+
+    /** Sends a snapshot to {@code player}, when that client runs this protocol. */
+    public static void sendSnapshot(ServerPlayer player, Snapshot<ItemStack> snapshot) {
+        send(player, new SnapshotPayload(snapshot));
+    }
+
+    private static void send(ServerPlayer player, CustomPacketPayload payload) {
+        if (!(player instanceof FakePlayer) && player.connection != null && player.connection.hasChannel(payload.type())) {
+            PacketDistributor.sendToPlayer(player, payload);
         }
     }
 
-    public static void sendToServer(Object message) {
-        if (channel != null) {
-            channel.sendToServer(message);
+    /** Sends a serverbound payload, when the server negotiated it. */
+    public static void sendToServer(@Nullable ICommonPacketListener connection, CustomPacketPayload payload) {
+        if (connection != null && connection.hasChannel(payload.type())) {
+            PacketDistributor.sendToServer(payload);
         }
     }
 }

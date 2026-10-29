@@ -3,13 +3,28 @@ import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
+import { checkReleaseBranch, loadProfiles, releaseIdentity, releaseLine } from './build-profile.mjs';
 
 const sha256 = file => createHash('sha256').update(fs.readFileSync(file)).digest('hex');
 const requireThat = (condition, message) => { if (!condition) throw Error(message); };
+// A manifest without a profile is the historical Forge line: v<version> tags, unqualified jars.
+export function manifestProfile(m, table = loadProfiles()) {
+  if (m.profile === undefined) {
+    requireThat([m.loader, m.minecraft, m.identity, m.releaseBranch].every(v => v === undefined), 'Partial release profile');
+    return { name: 'legacy', identity: 'legacy', loader: 'forge', repositoryLatest: true, releaseBranch: 'main' };
+  }
+  const p = table.profiles[m.profile];
+  requireThat(p && p.loader === m.loader && p.minecraft === m.minecraft && p.identity === m.identity
+    && typeof m.releaseBranch === 'string' && m.releaseBranch, 'Manifest does not match build profile ' + m.profile);
+  return { name: m.profile, ...p, releaseBranch: m.releaseBranch };
+}
 export function validateManifest(m) {
   requireThat(/^[a-z][a-z0-9_]*$/.test(m.modId) && typeof m.name === 'string' && m.name.trim(), 'Invalid mod identity');
   requireThat(/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-[0-9A-Za-z.-]+)?$/.test(m.version), 'Expected semantic mod_version');
-  requireThat(m.tag === 'v' + m.version && m.prerelease === (m.version.startsWith('0.') || m.version.includes('-')), 'Invalid resolved release policy');
+  const profile = manifestProfile(m);
+  const identity = profile.name === 'legacy' ? { tag: 'v' + m.version } : releaseIdentity(profile, m.modId, m.version);
+  requireThat(!identity.jarFilename || m.jarFilename === identity.jarFilename, 'Invalid release jar identity');
+  requireThat(m.tag === identity.tag && m.prerelease === (m.version.startsWith('0.') || m.version.includes('-')), 'Invalid resolved release policy');
   requireThat(['both', 'client', 'server'].includes(m.side) && /^[A-Za-z0-9_.+-]+\.jar$/.test(m.jarFilename), 'Invalid release asset identity');
   return m;
 }
@@ -37,13 +52,18 @@ export function releasePolicy(m, releases, refs, sha) {
   requireThat(tags.length === 0 || (tags.length === 1 && /^[0-9a-f]{40}$/.test(sha)
     && tags[0].object?.type === 'commit' && tags[0].object.sha === sha), 'Existing tag must point at exact built commit');
   requireThat(matches.length === 0 || tags.length === 1, 'Cannot resume draft without matching tag');
+  // Ordering and "latest" are scoped to this manifest's release line; other loader lines never interfere.
+  const profile = manifestProfile(m);
+  const line = profile.identity === 'legacy' ? 'legacy' : `${profile.loader}-${profile.minecraft}`;
   const numeric = tag => {
-    requireThat(/^v\d+\.\d+\.\d+$/.test(tag), 'Cannot order stable release: ' + tag);
-    return tag.slice(1).split('.').map(BigInt);
+    const { version } = releaseLine(tag);
+    requireThat((line !== 'legacy' || tag.startsWith('v')) && /^\d+\.\d+\.\d+$/.test(version), 'Cannot order stable release: ' + tag);
+    return version.split('.').map(BigInt);
   };
   const greater = (a, b) => { for (let i = 0; i < 3; i++) if (a[i] !== b[i]) return a[i] > b[i]; return false; };
-  const stable = releases.filter(r => !r.draft && !r.prerelease);
-  return { latest: !m.prerelease && stable.every(r => greater(numeric(m.tag), numeric(r.tag_name))),
+  const stable = releases.filter(r => !r.draft && !r.prerelease && releaseLine(r.tag_name).line === line);
+  const newest = stable.every(r => greater(numeric(m.tag), numeric(r.tag_name)));
+  return { latest: profile.repositoryLatest && !m.prerelease && newest,
     draft: matches[0], tagExists: tags.length === 1 };
 }
 export function publishRelease(m, dir, root, repo, sha, gh,
@@ -98,7 +118,9 @@ export function publishRelease(m, dir, root, repo, sha, gh,
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   try {
     const [command, manifestFile, dir] = process.argv.slice(2);
-    const m = JSON.parse(fs.readFileSync(manifestFile, 'utf8'));
+    const m = validateManifest(JSON.parse(fs.readFileSync(manifestFile, 'utf8')));
+    // Preparation and publication both refuse a branch the manifest's profile does not release from.
+    checkReleaseBranch(manifestProfile(m), process.env.GITHUB_REF_NAME);
     if (command === 'prepare') prepareAssets(m, dir, '.', process.env.GITHUB_SERVER_URL, process.env.GITHUB_REPOSITORY);
     else if (command === 'publish') {
       publishRelease(m, dir, '.', process.env.GH_REPO, process.env.GITHUB_SHA,

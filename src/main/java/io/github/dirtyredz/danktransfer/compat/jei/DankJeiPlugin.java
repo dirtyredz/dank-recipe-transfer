@@ -14,9 +14,8 @@ import net.minecraft.resources.ResourceLocation;
 @JeiPlugin
 public final class DankJeiPlugin implements IModPlugin {
     @Override
-    @SuppressWarnings("removal") // the (namespace, path) constructor keeps Forge 47.0-47.2 support
     public ResourceLocation getPluginUid() {
-        return new ResourceLocation(DankRecipeTransfer.MOD_ID, "jei");
+        return ResourceLocation.fromNamespaceAndPath(DankRecipeTransfer.MOD_ID, "jei");
     }
 
     @Override
