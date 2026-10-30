@@ -84,7 +84,7 @@ Requires only a JDK to run Gradle; the Java 21 toolchain is provisioned automati
 The build uses ModDevGradle 2.0.148 (official mappings).
 
 ```
-./gradlew test build verifyReleaseJar   # unit tests + release jar + jar guard
+./gradlew test build verifyReleaseJar   # unit tests + client-mixin bytecode check + release jar guard
 ./gradlew runGameTestServer             # headless NeoForge server GameTests against real Dank Storage
 git diff --check
 ```
@@ -116,7 +116,9 @@ Shared files are checked from the workspace with `tools/sync-mod-files.ps1 -Chec
 
 CI sets `profile: neoforge-1.21.1`, `releaseBranch: neoforge-1.21.1`, `datagen: false` and `gametests: true`
 (the real NeoForge suite against Dank Storage).
-The shared `verifyReleaseJar` guard checks metadata and excludes non-main classes/test resources.
+The `test` task applies every client mixin to the pinned JEI/EMI implementation jars and verifies
+the transformed classes with ASM before the shared `verifyReleaseJar` guard checks metadata and
+excludes non-main classes/test resources.
 It requires `neoforge.mods.toml` (refusing Forge's `mods.toml`), its `[[mixins]]` declaration, the mixin
 config with its optional-viewer gate and `JAVA_21` level, no manifest `MixinConfigs`, and the MIT license,
 as declared in `.ci/mod.json`. `.ci/port-provenance.json` (branch start, pack baseline, pinned dependency

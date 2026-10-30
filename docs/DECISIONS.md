@@ -29,9 +29,11 @@ Rejected: one cross-version source tree (the Minecraft API gap is too wide).
   on non-empty slots, so a depleted locked slot loses its lock under auto-sort; the transfer matches
   native Dank extraction (GameTest `autoSortGhostsMatchNativeExtraction`) rather than bypassing Dank to
   preserve the 1.20.1 behaviour. Rejected: writing Dank's lists directly during extraction.
-- **Viewer hooks kept.** The JEI and EMI mixins keep their targets; their descriptors were re-checked
-  against the pinned jars (README "Source pins"). Keeping narrow internal hooks preserves native
-  transfer when no Dank item is needed.
+- **Viewer hooks kept and transformed in the fast gate.** The JEI and EMI mixins keep their targets;
+  their descriptors are checked against the pinned jars (README "Source pins"). JEI's lookup is
+  wrapped by its exact descriptor so the original arguments are captured before JEI reuses their
+  local-variable slots. A headless JUnit test applies all four client mixins and verifies the
+  resulting bytecode. Keeping narrow internal hooks preserves native transfer when no Dank item is needed.
 
 ## 2026-10-25 - Shared hosted CI and deliberate releases
 

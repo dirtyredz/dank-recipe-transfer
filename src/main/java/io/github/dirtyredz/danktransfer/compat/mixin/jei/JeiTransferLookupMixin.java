@@ -1,14 +1,13 @@
 package io.github.dirtyredz.danktransfer.compat.mixin.jei;
 
+import com.llamalad7.mixinextras.injector.wrapmethod.WrapMethod;
+import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
 import io.github.dirtyredz.danktransfer.compat.jei.DankJeiTransferHandler;
 import mezz.jei.api.recipe.category.IRecipeCategory;
 import mezz.jei.api.recipe.transfer.IRecipeTransferHandler;
 import mezz.jei.library.recipes.RecipeTransferManager;
 import net.minecraft.world.inventory.AbstractContainerMenu;
 import org.spongepowered.asm.mixin.Mixin;
-import org.spongepowered.asm.mixin.injection.At;
-import org.spongepowered.asm.mixin.injection.Inject;
-import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
 import java.util.Optional;
 
@@ -18,13 +17,15 @@ import java.util.Optional;
  */
 @Mixin(value = RecipeTransferManager.class, remap = false)
 public abstract class JeiTransferLookupMixin {
-    @Inject(method = "getRecipeTransferHandler", at = @At("RETURN"), cancellable = true)
-    private <C extends AbstractContainerMenu, R> void dankRecipeTransfer$decorate(
-            C container, IRecipeCategory<R> category, CallbackInfoReturnable<Optional<IRecipeTransferHandler<C, R>>> cir) {
-        Optional<IRecipeTransferHandler<C, R>> found = cir.getReturnValue();
-        Optional<IRecipeTransferHandler<C, R>> decorated = DankJeiTransferHandler.decorate(container, category.getRecipeType(), found);
-        if (decorated != found) {
-            cir.setReturnValue(decorated);
-        }
+    @WrapMethod(
+            method = "getRecipeTransferHandler(Lnet/minecraft/world/inventory/AbstractContainerMenu;" +
+                    "Lmezz/jei/api/recipe/category/IRecipeCategory;)Ljava/util/Optional;",
+            remap = false
+    )
+    private <C extends AbstractContainerMenu, R> Optional<IRecipeTransferHandler<C, R>> dankRecipeTransfer$decorate(
+            C container, IRecipeCategory<R> category,
+            Operation<Optional<IRecipeTransferHandler<C, R>>> original) {
+        Optional<IRecipeTransferHandler<C, R>> found = original.call(container, category);
+        return DankJeiTransferHandler.decorate(container, category.getRecipeType(), found);
     }
 }

@@ -110,6 +110,10 @@ dependencies {
 
     testImplementation 'org.junit.jupiter:junit-jupiter:5.10.2'
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+    testRuntimeOnly 'io.github.llamalad7:mixinextras-neoforge:0.5.5'
+    // The client-mixin regression test transforms the exact pinned viewer implementations.
+    testRuntimeOnly("mezz.jei:jei-${minecraft_version}-neoforge:${jei_version}") { transitive = false }
+    testRuntimeOnly("dev.emi:emi-neoforge:${emi_version}") { transitive = false }
 }
 
 test {
