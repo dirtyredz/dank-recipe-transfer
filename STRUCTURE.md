@@ -23,7 +23,7 @@ Code map. Behaviour and protocol: [README.md](README.md).
 - `src/main/java/io/github/dirtyredz/danktransfer/compat/mixin/` — the mixin package (`jei/`, `emi/`); nothing else may live here
 - `src/main/resources/` — `META-INF/neoforge.mods.toml` (dependencies and `[[mixins]]`), mixin config, lang
 - `src/test/java/io/github/dirtyredz/danktransfer/` — pure JUnit tests plus the headless client-mixin transformer/bytecode verifier (`mixincheck/`)
-- `src/test/resources/` — isolated Mixin service/config used only by the client-mixin verifier
+- `src/test/resources/` — isolated Mixin service registrations used only by the client-mixin verifier
 - `src/gameTest/java/io/github/dirtyredz/danktransfer/` — NeoForge GameTests (`crafting/ItemKeyGameTests` beside the package it tests); never in the release jar
 - `src/gameTest/resources/` — GameTest structure (`data/dank_recipe_transfer/structure/empty.nbt`) and a test-only Dank blacklist tag (`data/dankstorage/tags/item/blacklisted_storage.json`)
 - `docs/` — design decisions
@@ -42,6 +42,7 @@ Code map. Behaviour and protocol: [README.md](README.md).
 | JEI | `compat/jei/*`, `compat/mixin/jei/JeiTransferLookupMixin` | Decorate the native table/inventory handlers at lookup |
 | EMI | `compat/emi/*`, `compat/mixin/emi/*` | Decorate native handlers in `getAllHandlers`; refresh the cached fill button |
 | Polymorph | `compat/polymorph/PolymorphSelection` | Select the requested recipe before the result recomputes |
+| Client-mixin verifier | `mixincheck/ClientMixinVerificationTest`, `ClientMixinHarness`, `ClientMixinTestService`, `ClientMixinTestProperties` | Read the production client-mixin list and annotation targets, apply each mixin headlessly to pinned viewer bytecode, then load and ASM-verify every transformed class |
 
 ## Dependency direction
 
@@ -55,9 +56,10 @@ client when that viewer is installed.
 - Mixins must live in `compat/mixin/`: Mixin forbids normal code from loading classes in the mixin
   package, so handlers stay in `compat/jei` and `compat/emi`.
 - All mixins target other mods' classes with `remap = false`; NeoForge runs on official names, so there is no refmap and no reobfuscation.
-- `ClientMixinVerificationTest` applies every client mixin to the exact pinned JEI/EMI classes and
-  verifies the transformed bytecode. The test resources deliberately omit `MixinGate`, forcing the
-  physical-client mixins to run headlessly without starting Minecraft.
+- `ClientMixinVerificationTest` reads every client entry from the production mixin config and each
+  target from its `@Mixin` annotation. `ClientMixinHarness` makes a runtime copy of that config
+  without `MixinGate`, forcing all physical-client mixins to run headlessly against the exact pinned
+  JEI/EMI classes before transformed-class loading and ASM verification.
 - `TransferMessages` stays free of NeoForge network types so its framing is unit-tested with string prototypes; `ItemPrototypeCodec` and `network/payload/` are the only registry-aware parts, exercised by `SnapshotWireGameTests`.
 - ModDevGradle groups the `main` and `gameTest` outputs under one mod id in development, so dev runs load the GameTest classes and resources; only `gameTestServer` enables the namespace, and the release jar is built from `main` alone (the jar guard rejects anything else).
 - `TransferPlanner` is generic over the key type on purpose: it keeps the hardest logic testable

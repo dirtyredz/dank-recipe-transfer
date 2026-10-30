@@ -13,6 +13,7 @@ import org.spongepowered.asm.service.ITransformer;
 import org.spongepowered.asm.service.ITransformerProvider;
 import org.spongepowered.asm.service.MixinServiceAbstract;
 
+import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.MalformedURLException;
@@ -21,17 +22,27 @@ import java.net.URL;
 import java.nio.file.Path;
 import java.util.Collection;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
-/** Minimal classpath-backed Mixin service used only by {@link ClientMixinVerificationTest}. */
+/** Minimal classpath-backed Mixin service used by {@link ClientMixinHarness}. */
 public final class ClientMixinTestService extends MixinServiceAbstract implements IClassProvider,
         IClassBytecodeProvider, ITransformerProvider, IClassTracker, IMixinAuditTrail {
+    private static final Map<String, byte[]> RESOURCE_OVERRIDES = new ConcurrentHashMap<>();
     private final Set<String> invalidClasses = ConcurrentHashMap.newKeySet();
+
+    static void installResource(String name, byte[] contents) {
+        RESOURCE_OVERRIDES.put(name, contents.clone());
+    }
+
+    static void removeResource(String name) {
+        RESOURCE_OVERRIDES.remove(name);
+    }
 
     @Override
     public String getName() {
-        return "DRT client mixin verifier";
+        return "Headless client mixin verifier";
     }
 
     @Override
@@ -81,11 +92,15 @@ public final class ClientMixinTestService extends MixinServiceAbstract implement
 
     @Override
     public IContainerHandle getPrimaryContainer() {
-        return new ContainerHandleVirtual("dank-recipe-transfer-client-mixin-test");
+        return new ContainerHandleVirtual("headless-client-mixin-test");
     }
 
     @Override
     public InputStream getResourceAsStream(String name) {
+        byte[] override = RESOURCE_OVERRIDES.get(name);
+        if (override != null) {
+            return new ByteArrayInputStream(override);
+        }
         return loader().getResourceAsStream(name);
     }
 

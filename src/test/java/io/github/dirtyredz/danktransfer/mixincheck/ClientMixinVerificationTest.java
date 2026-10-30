@@ -1,116 +1,105 @@
 package io.github.dirtyredz.danktransfer.mixincheck;
 
-import com.llamalad7.mixinextras.MixinExtrasBootstrap;
+import com.google.gson.JsonArray;
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
 import org.junit.jupiter.api.Test;
+import org.objectweb.asm.AnnotationVisitor;
 import org.objectweb.asm.ClassReader;
-import org.objectweb.asm.util.CheckClassAdapter;
-import org.spongepowered.asm.launch.MixinBootstrap;
-import org.spongepowered.asm.mixin.MixinEnvironment;
-import org.spongepowered.asm.mixin.Mixins;
-import org.spongepowered.asm.mixin.transformer.IMixinTransformer;
+import org.objectweb.asm.ClassVisitor;
+import org.objectweb.asm.Opcodes;
+import org.objectweb.asm.Type;
 
-import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
-import java.io.PrintWriter;
-import java.io.StringWriter;
-import java.lang.reflect.Constructor;
-import java.lang.reflect.Method;
-import java.util.Arrays;
-import java.util.LinkedHashMap;
-import java.util.Map;
+import java.io.InputStreamReader;
+import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-/** Applies every client mixin to the exact pinned JEI/EMI bytecode without opening a client. */
+/** Applies every configured client mixin to the exact pinned JEI/EMI bytecode without opening a client. */
 class ClientMixinVerificationTest {
-    private static final Map<String, String> TARGETS = Map.of(
-            "mezz.jei.library.recipes.RecipeTransferManager", "JeiTransferLookupMixin",
-            "dev.emi.emi.registry.EmiRecipeFiller", "EmiHandlerLookupMixin",
-            "dev.emi.emi.api.widget.RecipeFillButtonWidget", "EmiFillButtonMixin",
-            "dev.emi.emi.widget.RecipeButtonWidget", "RecipeButtonWidgetAccessor"
-    );
+    private static final String CONFIG = "dank_recipe_transfer.mixins.json";
+    private static final String MIXIN_ANNOTATION = "Lorg/spongepowered/asm/mixin/Mixin;";
 
     @Test
     void clientMixinsApplyAndProduceVerifiableClasses() throws Exception {
-        MixinBootstrap.init();
-        IMixinTransformer transformer = newTransformer();
-        MixinExtrasBootstrap.init();
-        MixinEnvironment environment = MixinEnvironment.getCurrentEnvironment();
-        environment.setSide(MixinEnvironment.Side.CLIENT);
-        addConfiguration(environment);
+        ClientConfig config = clientConfig();
+        List<ClientMixinHarness.Target> targets = config.clientMixins().stream()
+                .map(mixin -> new ClientMixinHarness.Target(config.mixinPackage() + "." + mixin,
+                        annotatedTarget(config.mixinPackage() + "." + mixin)))
+                .toList();
 
-        Map<String, byte[]> transformed = new LinkedHashMap<>();
-        for (Map.Entry<String, String> target : TARGETS.entrySet()) {
-            byte[] original = classBytes(target.getKey());
-            byte[] result = transformer.transformClass(environment, target.getKey(), original);
-            assertTrue(result.length > 0, target.getValue() + " produced no bytecode");
-            assertFalse(Arrays.equals(original, result), target.getValue() + " was not applied");
-            transformed.put(target.getKey(), result);
-        }
+        List<ClientMixinHarness.Verification> verified = ClientMixinHarness.verify(CONFIG, targets);
 
-        TransformedClassLoader verifierLoader = new TransformedClassLoader(transformed);
-        for (Map.Entry<String, String> target : TARGETS.entrySet()) {
-            StringWriter diagnostics = new StringWriter();
-            CheckClassAdapter.verify(new ClassReader(transformed.get(target.getKey())), verifierLoader, false,
-                    new PrintWriter(diagnostics));
-            assertEquals("", diagnostics.toString(), target.getValue() + " failed ASM verification:\n" + diagnostics);
-            Class.forName(target.getKey(), false, verifierLoader);
-            System.out.println("Verified client mixin: " + target.getValue() + " -> " + target.getKey());
+        assertEquals(config.clientMixins(), verified.stream()
+                        .map(result -> result.target().mixinClass().substring(config.mixinPackage().length() + 1))
+                        .toList(),
+                "Every client mixin in the production config must be transformed and verified");
+        for (ClientMixinHarness.Verification result : verified) {
+            String mixin = result.target().mixinClass();
+            assertTrue(result.transformed(), mixin + " was not applied to " + result.target().targetClass());
+            assertEquals("", result.diagnostics(), mixin + " failed ASM verification:\n" + result.diagnostics());
+            assertNull(result.loadFailure(), mixin + " failed transformed-class loading");
+            System.out.println("Verified client mixin: " + mixin + " -> " + result.target().targetClass());
         }
     }
 
-    private static IMixinTransformer newTransformer() throws Exception {
-        Class<?> type = Class.forName("org.spongepowered.asm.mixin.transformer.MixinTransformer");
-        Constructor<?> constructor = type.getDeclaredConstructor();
-        constructor.setAccessible(true);
-        return (IMixinTransformer) constructor.newInstance();
-    }
-
-    private static void addConfiguration(MixinEnvironment environment) throws Exception {
-        Method add = Mixins.class.getDeclaredMethod("addConfiguration", String.class, MixinEnvironment.class);
-        add.setAccessible(true);
-        add.invoke(null, "dank_recipe_transfer.client-mixin-test.json", environment);
-    }
-
-    private static byte[] classBytes(String name) throws IOException {
-        String resource = name.replace('.', '/') + ".class";
-        try (InputStream input = Thread.currentThread().getContextClassLoader().getResourceAsStream(resource)) {
-            if (input == null) {
-                throw new IOException("Missing pinned viewer class " + resource);
-            }
-            ByteArrayOutputStream output = new ByteArrayOutputStream();
-            input.transferTo(output);
-            return output.toByteArray();
+    private static ClientConfig clientConfig() throws IOException {
+        try (InputStream input = resource(CONFIG);
+             InputStreamReader reader = new InputStreamReader(input, StandardCharsets.UTF_8)) {
+            JsonObject config = JsonParser.parseReader(reader).getAsJsonObject();
+            JsonArray client = config.getAsJsonArray("client");
+            List<String> mixins = new ArrayList<>(client.size());
+            client.forEach(element -> mixins.add(element.getAsString()));
+            return new ClientConfig(config.get("package").getAsString(), List.copyOf(mixins));
         }
     }
 
-    private static final class TransformedClassLoader extends ClassLoader {
-        private final Map<String, byte[]> classes;
-
-        private TransformedClassLoader(Map<String, byte[]> classes) {
-            super(Thread.currentThread().getContextClassLoader());
-            this.classes = classes;
-        }
-
-        @Override
-        protected Class<?> loadClass(String name, boolean resolve) throws ClassNotFoundException {
-            byte[] bytes = classes.get(name);
-            if (bytes == null) {
-                return super.loadClass(name, resolve);
-            }
-            synchronized (getClassLoadingLock(name)) {
-                Class<?> loaded = findLoadedClass(name);
-                if (loaded == null) {
-                    loaded = defineClass(name, bytes, 0, bytes.length);
+    private static String annotatedTarget(String mixinClass) {
+        List<String> targets = new ArrayList<>();
+        try (InputStream input = resource(mixinClass.replace('.', '/') + ".class")) {
+            new ClassReader(input).accept(new ClassVisitor(Opcodes.ASM9) {
+                @Override
+                public AnnotationVisitor visitAnnotation(String descriptor, boolean visible) {
+                    if (!MIXIN_ANNOTATION.equals(descriptor)) {
+                        return null;
+                    }
+                    return new AnnotationVisitor(Opcodes.ASM9) {
+                        @Override
+                        public AnnotationVisitor visitArray(String name) {
+                            if (!"value".equals(name)) {
+                                return null;
+                            }
+                            return new AnnotationVisitor(Opcodes.ASM9) {
+                                @Override
+                                public void visit(String ignored, Object value) {
+                                    targets.add(((Type) value).getClassName());
+                                }
+                            };
+                        }
+                    };
                 }
-                if (resolve) {
-                    resolveClass(loaded);
-                }
-                return loaded;
-            }
+            }, ClassReader.SKIP_CODE | ClassReader.SKIP_DEBUG | ClassReader.SKIP_FRAMES);
+        } catch (IOException e) {
+            throw new IllegalStateException("Cannot read client mixin " + mixinClass, e);
         }
+        assertEquals(1, targets.size(), mixinClass + " must declare exactly one @Mixin value target");
+        return targets.getFirst();
+    }
+
+    private static InputStream resource(String name) throws IOException {
+        InputStream input = Thread.currentThread().getContextClassLoader().getResourceAsStream(name);
+        if (input == null) {
+            throw new IOException("Missing classpath resource " + name);
+        }
+        return input;
+    }
+
+    private record ClientConfig(String mixinPackage, List<String> clientMixins) {
     }
 }

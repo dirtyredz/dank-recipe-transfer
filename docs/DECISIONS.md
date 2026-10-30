@@ -1,5 +1,18 @@
 # Decisions
 
+## 2026-10-30 - Verify client mixins with a headless transformer
+
+The ordinary `test` gate reads the production mixin config's complete `client` list, derives each
+target from the mixin class's `@Mixin` annotation, applies a runtime copy of the config without the
+optional-mod gate, and loads plus ASM-verifies the transformed pinned JEI/EMI classes. This catches
+both injection drift and verifier-invalid bytecode without starting Minecraft, while ensuring a new
+production client mixin cannot be omitted from the guard's own list.
+
+Rejected: a client boot, because it is slow, graphical and unsuitable for the fast gate; and a
+GameTest, because the server harness is the wrong physical side and does not load client viewer
+classes. The harness's narrow reflection into Mixin internals is accepted and maintained alongside
+Mixin/MixinExtras dependency bumps.
+
 ## 2026-10-29 - NeoForge 1.21.1 line on its own branch
 
 The port lives on the long-lived `neoforge-1.21.1` branch, started from Forge `main` at
