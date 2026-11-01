@@ -1,5 +1,12 @@
 # Decisions
 
+## 2026-11-01 - NeoForge 1.21.1 becomes main; Forge frozen
+
+Owner-authorized cutover: `main` is the NeoForge 1.21.1 line (fast-forwarded from `neoforge-1.21.1`) and
+the Forge 1.20.1 tip is preserved at `forge-1.20.1` (`233d9fd`). Forge is frozen: no further maintenance, existing
+`v<version>` releases untouched. `.ci/mod.json` declares `releaseBranch: main`; releases keep the
+`neoforge-1.21.1-v<version>` tag and loader-qualified jar names.
+
 ## 2026-10-30 - Verify client mixins with a headless transformer
 
 The ordinary `test` gate reads the production mixin config's complete `client` list, derives each

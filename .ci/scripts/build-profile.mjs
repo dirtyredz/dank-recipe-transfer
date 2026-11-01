@@ -35,9 +35,13 @@ export function resolveProfile(config, table = loadProfiles()) {
   requireThat(typeof name === 'string' && Object.hasOwn(table.profiles, name), 'Unknown build profile: ' + name);
   const releaseBranch = config.releaseBranch ?? 'main';
   requireThat(typeof releaseBranch === 'string' && branchPattern.test(releaseBranch), 'Invalid releaseBranch');
-  requireThat(name === table.default || releaseBranch !== 'main' || table.profiles[name].repositoryLatest,
+  // A non-default profile must declare its releaseBranch explicitly: 'main' is a deliberate cutover
+  // (the profile became the main line), never an accident of omission.
+  requireThat(name === table.default || config.releaseBranch !== undefined,
     'A non-default profile must declare its own releaseBranch');
-  return { name, ...table.profiles[name], releaseBranch };
+  // Whatever line main carries is the repository's latest; other lines only if their profile says so.
+  const repositoryLatest = table.profiles[name].repositoryLatest || releaseBranch === 'main';
+  return { name, ...table.profiles[name], repositoryLatest, releaseBranch };
 }
 
 /** Release tag and jar name. Legacy keeps the historical Forge v<version> line byte-for-byte. */

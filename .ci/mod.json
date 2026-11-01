@@ -2,7 +2,7 @@
   "modId": "dank_recipe_transfer",
   "mainPackage": "io.github.dirtyredz.danktransfer",
   "profile": "neoforge-1.21.1",
-  "releaseBranch": "neoforge-1.21.1",
+  "releaseBranch": "main",
   "datagen": false,
   "gametests": true,
   "packSide": "both",

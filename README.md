@@ -1,6 +1,6 @@
 # Dank Recipe Transfer
 
-NeoForge 1.21.1 companion mod (branch `neoforge-1.21.1`; the Forge 1.20.1 line stays on `main`): the JEI and EMI recipe-transfer button ("+") fills the vanilla
+NeoForge 1.21.1 companion mod (`main`; the Forge 1.20.1 line is frozen on the `forge-1.20.1` branch): the JEI and EMI recipe-transfer button ("+") fills the vanilla
 crafting table and the player's 2x2 inventory grid from what is already in the grid, then loose
 inventory, then any **Dank Storage** you carry. Transfers run on the server, are validated, and are
 all-or-nothing.
@@ -98,23 +98,23 @@ git diff --check
 ## Release
 
 The version lives only in `gradle.properties`. Prepare non-empty `docs/releases/<version>.md`
-for a release, then obtain the owner's go-ahead to push the `neoforge-1.21.1` branch (the
-release branch declared in `.ci/mod.json`; never merged into the Forge `main`). Push CI runs
+for a release, then obtain the owner's go-ahead to push `main` (the
+release branch declared in `.ci/mod.json`; never merged with the frozen `forge-1.20.1` line). Push CI runs
 `./gradlew test build verifyReleaseJar`; it publishes nothing.
 After green main CI and owner authorization, the agent dispatches
-`gh workflow run release.yml --ref neoforge-1.21.1`; any other branch is refused. The workflow verifies
+`gh workflow run release.yml --ref main`; any other branch is refused. The workflow verifies
 again, requires successful NeoForge GameTests, builds the final jar, creates its `neoforge-1.21.1-v<version>` tag, uploads a draft, reads every asset back and compares
 SHA-256 before publishing the jar, its `.sha256` and `dank_recipe_transfer.pw.toml`.
 The pack session consumes the published `.pw.toml`; the owner never publishes by hand.
 Versions starting with `0.` or containing `-` are prereleases. Existing releases/tags are
 refused, published bytes are never replaced, and a NeoForge release never becomes GitHub's
-repository-wide "latest" while Forge is the maintenance default.
+repository-wide "latest" only because it is the main line; the frozen Forge `v<version>` releases are untouched.
 A failed draft requires deliberate recovery before retrying.
 
 Local fast gate: `./gradlew --offline test build verifyReleaseJar` with cached dependencies.
 Shared files are checked from the workspace with `tools/sync-mod-files.ps1 -Check -Mod <this-worktree>`.
 
-CI sets `profile: neoforge-1.21.1`, `releaseBranch: neoforge-1.21.1`, `datagen: false` and `gametests: true`
+CI sets `profile: neoforge-1.21.1`, `releaseBranch: main`, `datagen: false` and `gametests: true`
 (the real NeoForge suite against Dank Storage).
 The `test` task applies every client mixin to the pinned JEI/EMI implementation jars and verifies
 the transformed classes with ASM before the shared `verifyReleaseJar` guard checks metadata and
