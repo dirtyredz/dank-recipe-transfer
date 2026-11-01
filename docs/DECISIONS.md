@@ -4,7 +4,7 @@
 
 Owner-authorized cutover: `main` is the NeoForge 1.21.1 line (fast-forwarded from `neoforge-1.21.1`) and
 the Forge 1.20.1 tip is preserved at `forge-1.20.1` (`233d9fd`). Forge is frozen and not releasable: no further maintenance, existing
-`v<version>` releases untouched; a future Forge hotfix would first need a commit on `forge-1.20.1` setting
+`v<version>` releases untouched; a future Forge hotfix would first need a commit on `forge-1.20.1` that syncs the current `.ci` tooling (resolver + `build-profiles.json`, so it cannot take "latest") and sets
 `releaseBranch: forge-1.20.1` in its `.ci/mod.json`. `.ci/mod.json` declares `releaseBranch: main`; releases keep the
 `neoforge-1.21.1-v<version>` tag and loader-qualified jar names.
 
