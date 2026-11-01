@@ -18,7 +18,7 @@ export function loadProfiles(file = profilesFile) {
     requireThat(name === `${p.loader}-${p.minecraft}`, 'Profile name must be <loader>-<minecraft>: ' + name);
     requireThat(['forge', 'neoforge'].includes(p.loader) && /^\d+\.\d+(?:\.\d+)?$/.test(p.minecraft)
       && Number.isInteger(p.java) && p.java >= 17, 'Invalid loader, Minecraft or Java in profile ' + name);
-    requireThat(['legacy', 'qualified'].includes(p.identity) && typeof p.repositoryLatest === 'boolean'
+    requireThat(['legacy', 'qualified'].includes(p.identity)
       && typeof p.metadata === 'string' && ['jar', 'reobfJar'].includes(p.archiveTask)
       && (p.loader === 'forge') === (p.archiveTask === 'reobfJar'), 'Inconsistent archive or identity in profile ' + name);
     requireThat(Array.isArray(p.forbiddenMetadata) && Array.isArray(p.supersededDatapackFiles)
@@ -39,8 +39,8 @@ export function resolveProfile(config, table = loadProfiles()) {
   // (the profile became the main line), never an accident of omission.
   requireThat(name === table.default || config.releaseBranch !== undefined,
     'A non-default profile must declare its own releaseBranch');
-  // Whatever line main carries is the repository's latest; other lines only if their profile says so.
-  const repositoryLatest = table.profiles[name].repositoryLatest || releaseBranch === 'main';
+  // The profile releasing from main is the repository's latest; other lines never are.
+  const repositoryLatest = releaseBranch === 'main';
   return { name, ...table.profiles[name], repositoryLatest, releaseBranch };
 }
 

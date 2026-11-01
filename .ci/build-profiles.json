@@ -12,8 +12,7 @@
       "modDataPacks": ["mod:forge", "mod:{modId}"],
       "testDatapack": "tools/test-world/datapack",
       "supersededDatapackFiles": [],
-      "identity": "legacy",
-      "repositoryLatest": true
+      "identity": "legacy"
     },
     "neoforge-1.21.1": {
       "loader": "neoforge",
@@ -29,8 +28,7 @@
         "data/minecraft/tags/functions/load.json",
         "data/mod_test_world/functions/quiet.mcfunction"
       ],
-      "identity": "qualified",
-      "repositoryLatest": false
+      "identity": "qualified"
     }
   }
 }

@@ -107,8 +107,8 @@ again, requires successful NeoForge GameTests, builds the final jar, creates its
 SHA-256 before publishing the jar, its `.sha256` and `dank_recipe_transfer.pw.toml`.
 The pack session consumes the published `.pw.toml`; the owner never publishes by hand.
 Versions starting with `0.` or containing `-` are prereleases. Existing releases/tags are
-refused, published bytes are never replaced, and a NeoForge release never becomes GitHub's
-repository-wide "latest" only because it is the main line; the frozen Forge `v<version>` releases are untouched.
+refused, published bytes are never replaced, and a stable NeoForge release from `main` becomes the
+repository's latest; the frozen Forge `v<version>` releases are untouched.
 A failed draft requires deliberate recovery before retrying.
 
 Local fast gate: `./gradlew --offline test build verifyReleaseJar` with cached dependencies.
