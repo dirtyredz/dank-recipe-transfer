@@ -1,5 +1,9 @@
 # Decisions
 
+## 2026-11-08 - Optional equipment adapter shares the existing transaction
+
+Accept the exact Tweaks EquipmentMenu and CuriosEquipmentMenu names, behind their loader gates and `evileye_tweaks:equipment` identity. Validate the 2x2 grid and 36 player slots, ignoring the cosmetic/Curios tail. All snapshot, preflight and execution paths share CraftingMenuAccess; no new protocol, source discovery or rollback implementation. EMI decorates only Client's fully qualified EquipmentEmiPlugin$Handler. No optional classes are linked. JEI-only equipment and merging incomplete backpack/Dank supplies are excluded; positive Tweaks availability retains precedence, and pending/rejected requests never fall through to another executor.
+
 ## 2026-11-01 - NeoForge 1.21.1 becomes main; Forge frozen
 
 Owner-authorized cutover: `main` is the NeoForge 1.21.1 line (fast-forwarded from `neoforge-1.21.1`) and

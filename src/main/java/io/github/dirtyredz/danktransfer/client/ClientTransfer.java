@@ -108,8 +108,8 @@ public final class ClientTransfer {
 
     /** Plans {@code batches} sets of {@code recipe} in {@code menu}. Never sends anything. */
     public static Preflight preflight(AbstractContainerMenu menu, @Nullable Object recipe, int batches) {
-        Optional<CraftingMenuAccess> access = CraftingMenuAccess.of(menu);
         LocalPlayer player = Minecraft.getInstance().player;
+        Optional<CraftingMenuAccess> access = CraftingMenuAccess.of(player, menu);
         RecipeHolder<CraftingRecipe> holder = craftingHolder(recipe);
         if (access.isEmpty() || holder == null || player == null || !serverSupports()) {
             return Preflight.UNSUPPORTED;
@@ -220,7 +220,7 @@ public final class ClientTransfer {
         PENDING.expire(ticks, TIMEOUT_TICKS);
         Minecraft mc = Minecraft.getInstance();
         int desired = DankSnapshotCache.NONE;
-        if (mc.player != null && mc.screen != null && CraftingMenuAccess.isSupported(mc.player.containerMenu)
+        if (mc.player != null && mc.screen != null && CraftingMenuAccess.isSupported(mc.player, mc.player.containerMenu)
                 && serverSupports()) {
             desired = mc.player.containerMenu.containerId;
         }

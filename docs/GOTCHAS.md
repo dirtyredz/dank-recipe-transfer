@@ -1,5 +1,7 @@
 # Gotchas
 
+- Equipment menus have a cosmetic/Curios tail beyond the vanilla 46-slot prefix. Accept only the known gated classes and menu registry identity, then validate grid and inventory owners/indices. Never relax the vanilla slot-count check globally or use a handler's simple name (`Handler`) as a compatibility key.
+
 - **A successful mixin injection is not necessarily valid bytecode.** JEI 19.70.0.464 reuses the
   `container` and `category` argument slots inside
   `RecipeTransferManager#getRecipeTransferHandler`: they hold `MenuType` and `Optional` at RETURN.

@@ -29,7 +29,9 @@ Sophisticated Backpacks is not needed and not used.
 - Works on the vanilla `CraftingMenu` (crafting table) and `InventoryMenu` (2x2 grid), including
   subclasses that keep the vanilla layout (EnderIO painted crafting table, FTB Essentials `/craft`),
   with registered shaped and shapeless crafting recipes. Special recipes (dyeing, map cloning...),
-  modded crafting stations, AE2 terminals, Curios and nested containers keep native behaviour.
+  modded crafting stations, AE2 terminals and nested containers keep native behaviour.
+- EMI additionally supports Tweaks' `EquipmentMenu` and `CuriosEquipmentMenu` under `evileye_tweaks:equipment` through Client's exact `io.github.dirtyredz.evileyeclient.integration.emi.EquipmentEmiPlugin$Handler`. The adapter validates result 0, the 2x2 grid at 1-4 and the player's inventory at 9-44; armour/offhand/cosmetic/Curios slots are never loose ingredients. Tweaks and Curios are optional. JEI-only equipment support is not included.
+- With Tweaks 0.14.5 and Client 0.15.2, positive Tweaks availability keeps precedence; zero delegates before a request is sent. Pending requests, rejected sends and server rejections never trigger a second executor. A recipe split between backpack/pouch-only and Dank-only ingredients cannot combine those sources in one click.
 - **Sources, in order:** items already in the grid, then the 36 loose inventory slots (main
   inventory before hotbar), then each distinct Dank: carriers in the 36 slots, then the offhand.
   Several carriers on one frequency count once. The carriers themselves are never ingredients.

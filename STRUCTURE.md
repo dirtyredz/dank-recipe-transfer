@@ -30,6 +30,8 @@ Code map. Behaviour and protocol: [README.md](README.md).
 
 ## Components
 
+`crafting/EquipmentMenuLayout` owns the optional equipment type gate and fixed-prefix validation. `CraftingMenuAccess.of(player, menu)` supplies the same owner/lifetime check to snapshots, preflight and server validation. `compat/emi/EquipmentEmiCompatibility` allowlists the exact Client equipment handler without a Client dependency.
+
 | Component | Files | Responsibility |
 |---|---|---|
 | Planner | `crafting/PlanInput`, `TransferPlan`, `TransferPlanner` | Generic, side-effect-free allocation over any item key type; shared by client and server; unit-tested with strings |

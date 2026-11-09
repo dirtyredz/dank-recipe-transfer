@@ -80,7 +80,7 @@ public final class DankSnapshotService {
      */
     public void subscribe(ServerPlayer player, int menuId) {
         AbstractContainerMenu open = player.containerMenu;
-        if (open.containerId != menuId || !CraftingMenuAccess.isSupported(open)) {
+        if (open.containerId != menuId || !CraftingMenuAccess.isSupported(player, open)) {
             subscriptions.remove(player.getUUID());
             LOGGER.debug("Refused Dank snapshot subscription from {} for menu {} (open: {} #{})",
                     player.getGameProfile().getName(), menuId, open.getClass().getName(), open.containerId);
@@ -173,7 +173,7 @@ public final class DankSnapshotService {
 
     private static boolean stillOpen(ServerPlayer player, Subscription subscription) {
         return player.containerMenu.containerId == subscription.menuId
-                && CraftingMenuAccess.isSupported(player.containerMenu);
+                && CraftingMenuAccess.isSupported(player, player.containerMenu);
     }
 
     /** Sums identical items across every slot of every Dank, in wide arithmetic. */

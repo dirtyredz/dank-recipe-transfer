@@ -20,9 +20,10 @@ import java.util.Optional;
 import java.util.function.Predicate;
 
 /**
- * Vanilla crafting menu layouts: the crafting table ({@link CraftingMenu}) and the player
+ * Crafting menu layouts: the crafting table ({@link CraftingMenu}) and the player
  * inventory grid ({@link InventoryMenu}). A subclass is accepted only if it keeps the vanilla
- * slot layout (46 slots, crafting container behind the grid).
+ * slot layout (46 slots, crafting container behind the grid). Optional Tweaks equipment menus
+ * use the separately gated and validated {@link EquipmentMenuLayout} prefix, never the tail.
  *
  * <p>Menu slot layouts (vanilla 1.21.1):
  * <ul>
@@ -50,6 +51,9 @@ public final class CraftingMenuAccess {
     private static final int VANILLA_SLOT_COUNT = 46;
 
     public static Optional<CraftingMenuAccess> of(AbstractContainerMenu menu) {
+        if (menu != null && EquipmentMenuLayout.supports(menu)) {
+            return Optional.of(new CraftingMenuAccess(menu, 2, 2, 9));
+        }
         if (menu == null || menu.slots.size() != VANILLA_SLOT_COUNT) {
             return Optional.empty();
         }
@@ -68,6 +72,16 @@ public final class CraftingMenuAccess {
 
     public static boolean isSupported(AbstractContainerMenu menu) {
         return of(menu).isPresent();
+    }
+
+    /** Shared owner/lifetime check for subscriptions, client preflight and server requests. */
+    public static Optional<CraftingMenuAccess> of(Player player, AbstractContainerMenu menu) {
+        if (player == null || menu == null || player.containerMenu != menu || !menu.stillValid(player)) return Optional.empty();
+        return of(menu).filter(access -> access.inventorySlots().stream().allMatch(slot -> slot.container == player.getInventory()));
+    }
+
+    public static boolean isSupported(Player player, AbstractContainerMenu menu) {
+        return of(player, menu).isPresent();
     }
 
     public AbstractContainerMenu menu() {

@@ -56,7 +56,7 @@ public final class ServerRequestHandler {
         if (player.containerMenu.containerId != request.menuId()) {
             return TransferOutcome.WRONG_MENU;
         }
-        Optional<CraftingMenuAccess> access = CraftingMenuAccess.of(player.containerMenu);
+        Optional<CraftingMenuAccess> access = CraftingMenuAccess.of(player, player.containerMenu);
         if (access.isEmpty()) {
             return TransferOutcome.WRONG_MENU;
         }

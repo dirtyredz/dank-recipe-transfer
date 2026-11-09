@@ -39,7 +39,8 @@ import java.util.Map;
 
 /**
  * Wraps EMI's native {@link CraftingRecipeHandler} / {@link InventoryRecipeHandler} on their exact
- * vanilla menus. For a fill-button fill into the grid (destination {@code NONE}) it plans against
+ * vanilla menus, plus the explicitly allowlisted optional equipment handler on a validated equipment menu.
+ * For a fill-button fill into the grid (destination {@code NONE}) it plans against
  * the Dank snapshot; everything else (quick-craft to cursor or inventory, unsupported recipes,
  * the craftables sidebar) goes to the native handler with the ordinary inventory, so augmented
  * availability never authorises a native transfer that cannot reach the Danks.
@@ -69,7 +70,9 @@ public final class DankEmiTransferHandler<T extends AbstractContainerMenu> imple
             EmiRecipeHandler<T> handler = handlers.get(i);
             boolean table = handler.getClass() == CraftingRecipeHandler.class && menu instanceof CraftingMenu;
             boolean inventory = handler.getClass() == InventoryRecipeHandler.class && menu instanceof InventoryMenu;
-            if (table || inventory) {
+            boolean equipment = !(menu instanceof CraftingMenu) && !(menu instanceof InventoryMenu)
+                    && handler instanceof StandardRecipeHandler<?> && EquipmentEmiCompatibility.accepts(handler.getClass().getName());
+            if (table || inventory || equipment) {
                 if (result == null) {
                     result = new ArrayList<>(handlers);
                 }
