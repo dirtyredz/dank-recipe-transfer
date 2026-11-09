@@ -19,6 +19,8 @@ import static org.junit.jupiter.api.Assertions.*;
 class EquipmentMenuLayoutTest {
     @BeforeAll
     static void bootstrap() {
+        // NeoForge feature-flag init needs a (possibly empty) mod list outside a launched game.
+        net.neoforged.fml.loading.LoadingModList.of(java.util.List.of(), java.util.List.of(), java.util.List.of(), java.util.List.of(), java.util.Map.of());
         SharedConstants.tryDetectVersion();
         Bootstrap.bootStrap();
     }
